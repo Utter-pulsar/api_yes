@@ -1,0 +1,27 @@
+node_modules/
+out/
+dist/
+tmp/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# ──────────────────────────────────────────────────────────────────────────
+# SECRETS — never commit credentials, OAuth tokens, or API keys.
+# The live data store lives in the OS userData dir (outside this repo), but
+# these patterns are a hard backstop in case anything is ever exported here.
+# ──────────────────────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite-*
+api-yes.json
+*.apiyes.json
+credentials*.json
+secrets*.json
+tokens*.json
+**/userData/
+**/_local/
+**/_scratch/
+*.pem
+*.key

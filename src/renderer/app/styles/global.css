@@ -1,0 +1,165 @@
+/* Primary hand-drawn Latin face. */
+@font-face {
+  font-family: 'Excalifont';
+  src: url('/fonts/Excalifont-Regular.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Chinese handwriting face. Excalifont has no CJK glyphs, so the stack falls back to
+   Xiaolai (小赖) for Chinese — English/numbers stay Excalifont, 中文 uses 小赖. */
+@font-face {
+  font-family: 'Xiaolai';
+  src: url('/fonts/Xiaolai-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Monospace hand-drawn face for keys / tokens / aligned numbers. */
+@font-face {
+  font-family: 'XiaolaiMono';
+  src: url('/fonts/XiaolaiMono-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme tokens. Channels are space-separated RGB so Tailwind's `/<alpha>` works.
+   Dark mode = `.dark` class on <html> (set by the store). */
+:root {
+  --paper: 251 247 239;
+  --ink: 43 43 43;
+  --card: 255 255 255;
+  --card-muted: 240 237 230;
+  --grain: rgba(43, 43, 43, 0.05);
+  --shadow: rgba(43, 43, 43, 0.85);
+}
+:root.dark {
+  --paper: 26 22 18;
+  --ink: 232 228 219;
+  --card: 42 36 32;
+  --card-muted: 21 18 14;
+  --grain: rgba(232, 228, 219, 0.07);
+  --shadow: rgba(0, 0, 0, 0.55);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: theme('fontFamily.doodle');
+    color: rgb(var(--ink));
+    background-color: rgb(var(--paper));
+    background-image: radial-gradient(var(--grain) 1px, transparent 1px);
+    background-size: 18px 18px;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  input,
+  textarea,
+  [contenteditable='true'] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+}
+
+@layer components {
+  /* Apply to any straight-edged element to give it a hand-drawn wobble.
+     Powered by the SVG turbulence filter defined in <DoodleFilter />. */
+  .doodle-edge {
+    filter: url(#doodle-wobble);
+  }
+  .doodle-card {
+    @apply rounded-[14px] border-2 border-ink bg-card/80 shadow-doodle;
+  }
+  .doodle-chip {
+    @apply inline-flex items-center gap-1 rounded-full border-2 border-ink px-2 py-0.5 text-sm;
+  }
+  .mono {
+    font-family: theme('fontFamily.doodleMono');
+  }
+}
+
+/* Frameless main window: only the header bar drags the window; controls opt out. */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* slim doodle scrollbars — the default for minor scroll areas. Big panes overlay a
+   hand-drawn thumb (useDoodleScrollbar). */
+::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--ink) / 0.28);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--ink) / 0.5);
+}
+
+/* a scroll container whose bar is replaced by a custom hand-drawn thumb: kill the native one */
+.doodle-scroll-host {
+  scrollbar-width: none;
+}
+.doodle-scroll-host::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* the overlaid hand-drawn scrollbar (see useDoodleScrollbar) */
+.doodle-scrollthumb {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.doodle-scrollthumb-bar {
+  background: rgb(var(--ink) / 0.38);
+  border-radius: 999px;
+  transition: width 130ms ease, height 130ms ease, background-color 150ms ease;
+}
+.doodle-scrollthumb.is-vertical .doodle-scrollthumb-bar {
+  width: 3px;
+  height: 100%;
+}
+.doodle-scrollthumb.is-horizontal .doodle-scrollthumb-bar {
+  width: 100%;
+  height: 3px;
+}
+.doodle-scrollthumb:hover .doodle-scrollthumb-bar,
+.doodle-scrollthumb.dragging .doodle-scrollthumb-bar {
+  background: rgb(var(--ink) / 0.72);
+}
+.doodle-scrollthumb.is-vertical:hover .doodle-scrollthumb-bar,
+.doodle-scrollthumb.is-vertical.dragging .doodle-scrollthumb-bar {
+  width: 8px;
+}
+.doodle-scrollthumb.is-horizontal:hover .doodle-scrollthumb-bar,
+.doodle-scrollthumb.is-horizontal.dragging .doodle-scrollthumb-bar {
+  height: 8px;
+}

@@ -1,0 +1,72 @@
+appId: com.utterpulsar.apiyes
+productName: API-YES
+copyright: Copyright © 2026 Utter_pulsar
+
+directories:
+  buildResources: build
+  output: dist
+
+# Exclusion-style (electron-vite convention): keeps out/, package.json AND the
+# production node_modules the main process requires at runtime. Only source/config
+# junk is stripped.
+files:
+  - '!**/.vscode/*'
+  - '!{.eslintrc,.eslintrc.cjs,.prettierrc,.prettierignore,.editorconfig}'
+  - '!{.env,.env.*,.npmrc}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,electron.vite.config.ts}'
+  - '!{README.md,README.zh-CN.md}'
+  - '!src/*'
+  - '!tailwind.config.js'
+  - '!postcss.config.js'
+
+# App logo (the orange knot) shipped as an extra resource so the tray / about can read
+# it at runtime from process.resourcesPath.
+extraResources:
+  - from: assets
+    to: assets
+    filter:
+      - '**/*'
+
+win:
+  target:
+    - nsis
+  # build/icon.png is auto-converted to a multi-size .ico by electron-builder
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  artifactName: ${productName}-${version}-setup.${ext}
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.developer-tools
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  maintainer: Utter_pulsar <noreply@apiyes.app>
+
+appImage:
+  artifactName: ${productName}-${version}.${ext}
+
+# Update feed: electron-updater reads this (embedded as app-update.yml) to find newer
+# GitHub Releases. The build workflow ships latest*.yml / .blockmap into each Release so
+# installed apps can discover + auto-install updates.
+publish:
+  provider: github
+  owner: Utter-pulsar
+  repo: API-YES
