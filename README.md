@@ -3,8 +3,8 @@
 
   <h1>API&nbsp;YES</h1>
 
-  <h3>A hand-drawn gateway for your AI subscriptions.</h3>
-  <p>Sign in to ChatGPT or Claude (or paste an API key), then spin up metered, local reverse-proxy endpoints — all in a warm, doodle-style window.</p>
+  <h3>A hand-drawn local tool for managing your own API keys.</h3>
+  <p>Gather your own API keys in one place and keep them organized — all in a warm, doodle-style window. For personal use only.</p>
 
   <p>
     <a href="./LICENSE"><img alt="License: GPL v3" src="https://img.shields.io/badge/license-GPLv3-5B8DEF.svg" /></a>
@@ -26,41 +26,48 @@
 
 <br />
 
-API YES is a tiny desktop app that turns _"I'm signed in to ChatGPT / Claude"_ into _"here's a localhost endpoint my tools can use"_ — and shows you exactly how many tokens each one is burning. Everything is hand-drawn — wobbly Rough.js borders, the Excalifont typeface, a warm paper grid — so a job that's usually a sterile dashboard feels like scribbling in the corner of a notebook.
+API YES is a tiny desktop app that gathers your own API keys in one place and keeps them organized — and shows you, at a glance, how many tokens each one is burning. It does one thing: it helps you manage **your own** API keys, for **your own** use. Everything is hand-drawn — wobbly Rough.js borders, the Excalifont typeface, a warm paper grid — so a job that's usually a sterile dashboard feels like scribbling in the corner of a notebook.
+
+## ⚠️ Before you use it
+
+- API YES is only for managing **API keys you own** — **for personal use only**.
+- Use only API keys you have obtained legitimately, and comply with each provider's terms.
+- **Do not offer it as a service to others, and do not share accounts or keys** — never make it available for anyone else to use.
+- You are solely responsible for how you use it and for any consequences.
 
 ## Features
 
 - 🎨&nbsp;&nbsp;**Hand-drawn, everywhere** — sketchy Rough.js borders, Excalifont + Xiaolai (小赖), a warm paper-grid canvas.
-- 🔑&nbsp;&nbsp;**Two ways to connect** — sign in to a **ChatGPT** (Plus / Pro / Team) or **Claude** (Pro / Max) subscription via OAuth, or paste an **OpenAI / Anthropic API key** (custom & relay base URLs welcome).
-- 🔌&nbsp;&nbsp;**Your own local endpoints** — every credential can spawn _any number_ of reverse-proxy endpoints, each with its own URL + key. Point your tool's base URL at it and go.
+- 🔑&nbsp;&nbsp;**Use your own API key** — paste in your own **API key** (custom & relay base URLs welcome). Every key stays local, for your own use.
+- 🔌&nbsp;&nbsp;**Local access for each key** — give every key _any number_ of local URLs, each with its own address + key, so you can keep them organized. Point your tool's base URL at it and go.
 - 📊&nbsp;&nbsp;**Per-key metering** — requests, input / output / cached / reasoning tokens, broken down by model and resettable any time.
 - 🚦&nbsp;&nbsp;**Token caps** — set a total-token ceiling per key; it returns 429 once it's used up.
 - 🌐&nbsp;&nbsp;**Per-key access scope** — keep a key loopback-only, or flip it to **Allow LAN**. The server binds `0.0.0.0` only when some key opts in; loopback-only keys are still 403-gated.
-- 🧠&nbsp;&nbsp;**Format-faithful forwarding** — OpenAI in → OpenAI out, Anthropic in → Anthropic out (so `thinking` / beta params survive). ChatGPT/Codex subscriptions get `/chat/completions` → `/responses` translation plus a curated `/models`.
+- 🧠&nbsp;&nbsp;**Format-faithful** — requests and responses pass through untouched, so special params aren't dropped.
 - 🌍&nbsp;&nbsp;**Bilingual UI** — switch the _entire_ app between **English** and **中文** on the fly.
 - 🌓&nbsp;&nbsp;**Light / dark paper** themes.
 - 🖥️&nbsp;&nbsp;**Run in background** — minimize to a tray, auto-start the server on launch, launch at login.
 - 🔄&nbsp;&nbsp;**Silent auto-update** — new versions download, install, and relaunch on their own (Windows / Linux).
-- 🔒&nbsp;&nbsp;**Local-first & encrypted** — everything lives in one local file; OAuth tokens and keys are encrypted with the OS keychain (`safeStorage`). Nothing leaves your machine except the upstream calls you make.
+- 🔒&nbsp;&nbsp;**Local-first & encrypted** — everything lives in one local file; API keys are encrypted with the OS keychain (`safeStorage`). Nothing leaves your machine except the upstream calls you make.
 - 🖥️&nbsp;&nbsp;**Cross-platform** — Windows, macOS and Linux (Electron).
 - ⚒️&nbsp;&nbsp;**Hackable core** — a typed query / command / event contract drives the whole app.
 
 ## Why API YES?
 
-I have a couple of AI subscriptions, but all my little scripts and tools just want a plain **base URL + key**. I wanted a warm little control panel that lives on my desktop, turns a sign-in into a localhost endpoint my tools can actually use, and shows me — at a glance — how many tokens each one is eating. Most gateway tools are grey dashboards and rigid forms; I wanted something that bounces when you poke it and doodles in the margins.
+I have a few of my own API keys scattered around, but all my little scripts and tools just want a plain **base URL + key**. I wanted a warm little control panel that lives on my desktop, gathers my own keys in one place, keeps them organized so my tools can actually use them, and shows me — at a glance — how many tokens each one is eating. Most tools like this are grey dashboards and rigid forms; I wanted something that bounces when you poke it and doodles in the margins.
 
 So I started building it for myself. **This is a personal project**, and now that this version feels good, I'll keep polishing it in my spare time. If you have an idea, a wish, or you hit a bug, **please open an [issue](../../issues)!** 💛
 
-## Quick start — using the proxy
+## Quick start — three steps
 
 1. In **Settings**, make sure the **API server** is running (default `127.0.0.1:8788`; the port is editable and it auto-starts by default).
-2. **Add a credential** → open it → **New API** → copy its URL + key.
+2. **Add your own API key** → open it → **New API** → copy its URL + key.
 3. Point your tool's base URL at it:
-   - **OpenAI** clients → `http://127.0.0.1:8788/v1`, API key = the proxy key.
-   - **Anthropic** clients → `http://127.0.0.1:8788`, API key = the proxy key.
-4. Call as usual — usage tallies live on that endpoint.
+   - Clients that expect a `/v1` base URL → `http://127.0.0.1:8788/v1`, API key = the key you copied.
+   - Clients that expect a root base URL → `http://127.0.0.1:8788`, API key = the key you copied.
+4. Call as usual — usage tallies live on that key.
 
-> Tip: right-click a credential in the left list for a quick **test / rename / delete** menu.
+> Tip: right-click a key in the left list for a quick **test / rename / delete** menu.
 
 ## Getting started (development)
 
@@ -85,7 +92,7 @@ npm run build:mac     # macOS
 npm run build:linux   # Linux
 ```
 
-Your data is stored locally in your OS app-data folder (OAuth tokens & API keys encrypted via the OS keychain):
+Your data is stored locally in your OS app-data folder (API keys encrypted via the OS keychain):
 
 - **Windows** — `%APPDATA%\API-YES\api-yes.json`
 - **macOS** — `~/Library/Application Support/API-YES/api-yes.json`
@@ -109,13 +116,6 @@ sudo chmod 4755 /opt/API-YES/chrome-sandbox
 ## Tech stack
 
 Electron · electron-vite · React 19 · Zustand · Tailwind CSS · framer-motion · Rough.js · TypeScript.
-
-## Notes & known limits
-
-- **ChatGPT subscription (OAuth)** tokens reach only the **Codex backend** (`/responses`), not `/chat/completions` directly. The app translates Chat Completions → Responses and serves a curated model list (kept in `src/main/services/provider/upstream.ts` → `CODEX_CHATGPT_MODELS`); **Test connection** probes the candidates and reports the first that answers. When OpenAI ships new models, that list needs a refresh.
-- **Claude subscription (OAuth)** requests to `/v1/messages` get the Claude Code system prefix + an `anthropic-beta` oauth header injected automatically (subscription tokens are rejected otherwise).
-- Usage metering skips very large (> 16 MB) streamed responses — they're still forwarded, just not billed.
-- The proxy server defaults to loopback only; it binds `0.0.0.0` (LAN) **only** when some key is set to **Allow LAN** — evaluate the risk yourself before exposing keys.
 
 ## License
 
