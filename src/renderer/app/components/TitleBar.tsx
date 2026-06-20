@@ -8,6 +8,7 @@ import { ModalScrim } from './ModalScrim'
 import { SettingsDialog } from './SettingsDialog'
 import { Wordmark } from './Wordmark'
 import logoUrl from '@assets/logo.png'
+import logoMarkUrl from '@assets/logo-mark.png' // knot cropped to its art, for the title-bar lockup
 
 type MenuDialog = 'settings' | 'about' | null
 
@@ -79,7 +80,7 @@ export function TitleBar(): JSX.Element {
           </svg>
         </button>
 
-        <img src={logoUrl} alt="" className="app-no-drag h-7 w-7 select-none" draggable={false} />
+        <img src={logoMarkUrl} alt="" className="app-no-drag h-5 w-auto select-none" draggable={false} />
         <Wordmark height={20} className="select-none text-ink" />
 
         {!isMac && <WindowControls />}
