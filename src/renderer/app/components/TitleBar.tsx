@@ -6,6 +6,7 @@ import { useT } from '../lib/i18n'
 import { DoodleBox } from './doodle/DoodleBox'
 import { ModalScrim } from './ModalScrim'
 import { SettingsDialog } from './SettingsDialog'
+import { Wordmark } from './Wordmark'
 import logoUrl from '@assets/logo.png'
 
 type MenuDialog = 'settings' | 'about' | null
@@ -78,8 +79,8 @@ export function TitleBar(): JSX.Element {
           </svg>
         </button>
 
-        <img src={logoUrl} alt="" className="app-no-drag h-6 w-6 select-none" draggable={false} />
-        <span className="select-none font-doodle text-base font-bold tracking-wide">API-YES</span>
+        <img src={logoUrl} alt="" className="app-no-drag h-7 w-7 select-none" draggable={false} />
+        <Wordmark height={20} className="select-none text-ink" />
 
         {!isMac && <WindowControls />}
       </div>
