@@ -69,4 +69,4 @@ appImage:
 publish:
   provider: github
   owner: Utter-pulsar
-  repo: API-YES
+  repo: api_yes
