@@ -1,7 +1,5 @@
 <div align="center">
-  <img src="./assets/logo.png" alt="API YES" width="120" />
-
-  <h1>API&nbsp;YES</h1>
+  <img src="./img/title.svg" alt="API YES" width="480" />
 
   <h3>A hand-drawn local tool for managing your own API keys.</h3>
   <p>Gather your own API keys in one place and keep them organized — all in a warm, doodle-style window. For personal use only.</p>
@@ -21,7 +19,7 @@
 <br />
 
 <div align="center">
-  <img src="./img/app.png" alt="API YES screenshot" width="820" />
+  <img src="./img/app-en.png" alt="API YES screenshot" width="820" />
 </div>
 
 <br />

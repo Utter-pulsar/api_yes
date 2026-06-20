@@ -63,3 +63,29 @@ export function claudeCodeTransform(reqPath: string): ((raw: Buffer) => Buffer) 
     }
   }
 }
+
+/**
+ * Force `stream_options.include_usage` on OpenAI-compatible chat-completions STREAMING requests.
+ * The OpenAI Chat Completions protocol only emits a terminal usage chunk when the client opts in
+ * via this flag (official OpenAI, Qwen/DashScope, vLLM, DeepSeek, … all follow the same rule), and
+ * most clients omit it — so without this the proxy never sees token counts and can't meter the
+ * request. We touch ONLY chat completions (the Responses API reports usage unconditionally) and
+ * leave any client-set stream_options intact. We deliberately do NOT add the non-standard
+ * `continuous_usage_stats` (vLLM-only; official OpenAI 400s on unknown stream_options) — if a client
+ * wants per-chunk usage it can pass that itself, and the meter will honor it.
+ */
+export function openaiUsageTransform(reqPath: string): ((raw: Buffer) => Buffer) | undefined {
+  if (!/\/chat\/completions\b/.test(reqPath)) return undefined
+  return (raw: Buffer): Buffer => {
+    try {
+      const obj = JSON.parse(raw.toString('utf8')) as AnyObj
+      if (obj.stream !== true) return raw
+      const so = (obj.stream_options ?? {}) as AnyObj
+      if (so.include_usage === true) return raw
+      obj.stream_options = { ...so, include_usage: true }
+      return Buffer.from(JSON.stringify(obj), 'utf8')
+    } catch {
+      return raw
+    }
+  }
+}

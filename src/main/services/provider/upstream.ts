@@ -3,7 +3,7 @@ import type { AppCore } from '../context'
 import { toCredentialView, type OAuthTokens, type StoredCredential } from '../store'
 import { refreshAnthropicToken } from '../oauth/anthropic-oauth'
 import { refreshOpenAIToken } from '../oauth/openai-oauth'
-import { claudeCodeTransform, joinUpstream } from './forward-util'
+import { claudeCodeTransform, joinUpstream, openaiUsageTransform } from './forward-util'
 import { CODEX_BASE, CODEX_CHATGPT_MODELS, codexHeaders } from './codex'
 import { mt, listJoin } from '../i18n'
 
@@ -74,7 +74,9 @@ export async function resolveForward(
       return {
         url: joinUpstream(cred.baseUrl, reqPath, search),
         setHeaders: { authorization: `Bearer ${cred.apiKey}` },
-        dropHeaders: ['x-api-key']
+        dropHeaders: ['x-api-key'],
+        // make streaming chat completions report usage so the proxy can meter tokens
+        transformBody: openaiUsageTransform(reqPath)
       }
     }
     return {

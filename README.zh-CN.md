@@ -1,7 +1,5 @@
 <div align="center">
-  <img src="./assets/logo.png" alt="API YES" width="120" />
-
-  <h1>API&nbsp;YES</h1>
+  <img src="./img/title.svg" alt="API YES" width="480" />
 
   <h3>管理你自己的 API Key 的手绘风本地小工具。</h3>
   <p>把你自己的 API Key 收拢到一处，集中整理、管好、给自己用 —— 全程在一个温暖的涂鸦风窗口里完成。仅供个人使用。</p>

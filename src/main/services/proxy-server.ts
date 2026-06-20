@@ -3,7 +3,7 @@ import { networkInterfaces } from 'node:os'
 import type { ProxyEndpoint, ProxyServerStatus, Provider } from '@shared/types'
 import type { AppCore } from './context'
 import { ensureAccessToken, mergeHeaderValue, resolveForward } from './provider/upstream'
-import { parseUsage } from './provider/usage'
+import { createUsageMeter, type ParsedUsage } from './provider/usage'
 import type { StoredCredential } from './store'
 import { mt } from './i18n'
 import {
@@ -32,8 +32,6 @@ function isLoopback(addr?: string): boolean {
   if (!addr) return false
   return addr === '::1' || addr === '::ffff:127.0.0.1' || addr.startsWith('127.')
 }
-
-const PARSE_CAP = 16 * 1024 * 1024 // stop collecting for usage past 16MB (still streams through)
 
 // hop-by-hop headers never forwarded (RFC 7230) + ones fetch/undici manages itself
 const STRIP_REQ = new Set([
@@ -254,9 +252,80 @@ export class ProxyServer {
     res.writeHead(upstream.status, outHeaders)
 
     const contentType = upstream.headers.get('content-type') ?? ''
-    const chunks: Buffer[] = []
-    let collected = 0
-    let capped = false
+    // We inject stream_options.include_usage into OpenAI chat requests the client didn't ask for, so
+    // the upstream now emits a terminal "usage-only" chunk (choices:[] + usage). Strip that chunk back
+    // out before forwarding (we still meter it) so the client sees exactly the stream it would have
+    // gotten without our injection — some clients otherwise re-render the whole answer on that extra
+    // chunk. "We injected" ⇔ the body was rewritten (openaiUsageTransform returns the SAME buffer when
+    // it doesn't touch it); a client that set include_usage itself isn't rewritten → passes through.
+    const stripInjectedUsage =
+      upstream.ok &&
+      cred.provider === 'openai' &&
+      hasBody &&
+      sendBody !== rawBody &&
+      contentType.includes('text/event-stream')
+
+    // Meter usage off a tee of the stream. The meter yields CUMULATIVE snapshots; we bill the DELTA
+    // each time it advances. Providers that report usage continuously (Anthropic message_delta, vLLM
+    // continuous_usage_stats) meter live — a mid-stream disconnect still bills what arrived — while
+    // providers that emit usage only at the end just bill once. No upstream usage → nothing billed.
+    const meter = upstream.ok ? createUsageMeter(cred.provider, contentType) : null
+    const dec = new TextDecoder()
+    const enc = stripInjectedUsage ? new TextEncoder() : null
+    const committed = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0 }
+    let billModel: string | undefined
+    let billedAny = false
+    const commit = (snap: ParsedUsage | null): void => {
+      if (!snap) return
+      if (snap.model) billModel = snap.model
+      const delta = {
+        inputTokens: Math.max(0, snap.inputTokens - committed.inputTokens),
+        outputTokens: Math.max(0, snap.outputTokens - committed.outputTokens),
+        cachedTokens: Math.max(0, snap.cachedTokens - committed.cachedTokens),
+        reasoningTokens: Math.max(0, snap.reasoningTokens - committed.reasoningTokens)
+      }
+      if (delta.inputTokens || delta.outputTokens || delta.cachedTokens || delta.reasoningTokens) {
+        committed.inputTokens += delta.inputTokens
+        committed.outputTokens += delta.outputTokens
+        committed.cachedTokens += delta.cachedTokens
+        committed.reasoningTokens += delta.reasoningTokens
+        this.billTokens(endpoint.id, delta)
+        billedAny = true
+      }
+    }
+    const meterText = (text: string): void => {
+      if (!meter || !text) return
+      try {
+        commit(meter.push(text))
+      } catch {
+        /* usage is best-effort */
+      }
+    }
+    // strip mode: forward complete SSE lines, dropping our injected usage-only chunk; keep the partial
+    // trailing line in `fwd` for the next read. Re-encoding decoded UTF-8 text round-trips byte-for-byte.
+    let fwd = ''
+    const forwardFiltered = (text: string, flush: boolean): void => {
+      if (!enc) return
+      fwd += text
+      let out = ''
+      let nl: number
+      while ((nl = fwd.indexOf('\n')) >= 0) {
+        const line = fwd.slice(0, nl + 1)
+        fwd = fwd.slice(nl + 1)
+        if (!isUsageOnlyDataLine(line)) out += line
+      }
+      if (flush && fwd && !isUsageOnlyDataLine(fwd)) {
+        out += fwd
+        fwd = ''
+      }
+      if (out) {
+        try {
+          res.write(enc.encode(out))
+        } catch {
+          /* client gone */
+        }
+      }
+    }
 
     if (upstream.body) {
       const reader = upstream.body.getReader()
@@ -264,27 +333,40 @@ export class ProxyServer {
         for (;;) {
           const { done, value } = await reader.read()
           if (done) break
-          const buf = Buffer.from(value)
-          res.write(buf)
-          if (!capped) {
-            collected += buf.length
-            if (collected <= PARSE_CAP) chunks.push(buf)
-            else capped = true
+          if (stripInjectedUsage) {
+            const text = dec.decode(value, { stream: true })
+            meterText(text)
+            forwardFiltered(text, false)
+          } else {
+            res.write(Buffer.from(value))
+            meterText(dec.decode(value, { stream: true }))
           }
         }
       } catch {
-        /* client disconnected mid-stream — stop, we may still have enough to bill */
+        /* client disconnected mid-stream — keep whatever we already billed */
       }
+      // flush the decoder tail through the same meter + (in strip mode) drop filter
+      const tail = dec.decode()
+      meterText(tail)
+      if (stripInjectedUsage) forwardFiltered(tail, true)
     }
     res.end()
 
-    // bill usage off the tee'd copy (only if the upstream call itself succeeded)
-    if (upstream.ok && !capped && chunks.length) {
+    // finalize the parser, then count the request once (a request that produced no parseable usage
+    // isn't counted, matching the per-token meters).
+    if (meter) {
       try {
-        const usage = parseUsage(cred.provider, Buffer.concat(chunks).toString('utf8'), contentType)
-        if (usage) this.bill(endpoint.id, usage)
+        commit(meter.end())
       } catch {
         /* usage is best-effort */
+      }
+      if (billedAny) {
+        // attribute the per-model breakdown once, with the resolved model + this request's totals,
+        // so byModel stays consistent with the top-level counters even if early chunks lacked a model
+        this.billRequest(endpoint.id, billModel, {
+          inputTokens: committed.inputTokens,
+          outputTokens: committed.outputTokens
+        })
       }
     }
   }
@@ -359,29 +441,58 @@ export class ProxyServer {
     }
   }
 
-  private bill(
+  /** Add token deltas to an endpoint's TOP-LEVEL meters (no request/byModel) and push the live total
+   *  to the UI. Called repeatedly across a stream as the upstream's cumulative usage advances. */
+  private billTokens(
     proxyId: string,
-    usage: { inputTokens: number; outputTokens: number; cachedTokens: number; reasoningTokens: number; model?: string }
+    delta: { inputTokens: number; outputTokens: number; cachedTokens: number; reasoningTokens: number }
+  ): void {
+    let updated: ProxyEndpoint | undefined
+    this.core.store.mutate((db) => {
+      const p = db.proxies.find((x) => x.id === proxyId)
+      if (!p) return
+      p.usage.inputTokens += delta.inputTokens
+      p.usage.outputTokens += delta.outputTokens
+      p.usage.cachedTokens += delta.cachedTokens
+      p.usage.reasoningTokens += delta.reasoningTokens
+      p.usage.lastUsedAt = Date.now()
+      updated = p
+    })
+    if (updated) this.core.broadcast('proxy.usage', { proxyId, usage: updated.usage })
+  }
+
+  /** Count one request against an endpoint (once, after its usage settled) and fold this request's
+   *  totals into the per-model breakdown — done here, not per-chunk, so byModel matches top-level. */
+  private billRequest(
+    proxyId: string,
+    model?: string,
+    totals?: { inputTokens: number; outputTokens: number }
   ): void {
     let updated: ProxyEndpoint | undefined
     this.core.store.mutate((db) => {
       const p = db.proxies.find((x) => x.id === proxyId)
       if (!p) return
       p.usage.requests += 1
-      p.usage.inputTokens += usage.inputTokens
-      p.usage.outputTokens += usage.outputTokens
-      p.usage.cachedTokens += usage.cachedTokens
-      p.usage.reasoningTokens += usage.reasoningTokens
-      p.usage.lastUsedAt = Date.now()
-      if (usage.model) {
-        const m = (p.usage.byModel[usage.model] ??= { requests: 0, inputTokens: 0, outputTokens: 0 })
+      if (model) {
+        const m = (p.usage.byModel[model] ??= { requests: 0, inputTokens: 0, outputTokens: 0 })
         m.requests += 1
-        m.inputTokens += usage.inputTokens
-        m.outputTokens += usage.outputTokens
+        if (totals) {
+          m.inputTokens += totals.inputTokens
+          m.outputTokens += totals.outputTokens
+        }
       }
       updated = p
     })
     if (updated) this.core.broadcast('proxy.usage', { proxyId, usage: updated.usage })
+  }
+
+  /** One-shot bill (tokens + request) for the Codex path, whose usage is known only at the end. */
+  private bill(
+    proxyId: string,
+    usage: { inputTokens: number; outputTokens: number; cachedTokens: number; reasoningTokens: number; model?: string }
+  ): void {
+    this.billTokens(proxyId, usage)
+    this.billRequest(proxyId, usage.model, { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })
   }
 
   /** Emit an error in the provider's native shape so the client surfaces the real message
@@ -407,6 +518,22 @@ function errText(e: unknown): string {
     return causeMsg ? `${e.message}（${causeMsg}）` : e.message
   }
   return String(e)
+}
+
+/** True for an OpenAI streaming "usage-only" SSE line: `data: {choices:[], usage:{…}}`. That's the
+ *  chunk our injected stream_options.include_usage makes the upstream emit; we meter it but drop it
+ *  from the client stream so the client sees the stream it would have without our injection. */
+function isUsageOnlyDataLine(rawLine: string): boolean {
+  const line = rawLine.trim()
+  if (!line.startsWith('data:')) return false
+  const payload = line.slice(5).trim()
+  if (!payload || payload === '[DONE]') return false
+  try {
+    const o = JSON.parse(payload) as { choices?: unknown; usage?: unknown }
+    return (!Array.isArray(o.choices) || o.choices.length === 0) && o.usage != null
+  } catch {
+    return false
+  }
 }
 
 function extractKey(req: IncomingMessage): string | null {
