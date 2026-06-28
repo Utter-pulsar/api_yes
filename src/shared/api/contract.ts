@@ -9,7 +9,8 @@ import type {
   ProxyEndpoint,
   ProxyServerStatus,
   ProxyUsage,
-  TestResult
+  TestResult,
+  UsageReport
 } from '../types'
 
 // ===========================================================================
@@ -87,6 +88,8 @@ export type CommandMap = {
     input: { id: Id }
     result: { ok: boolean; models: ModelInfo[]; message: string }
   }
+  /** read subscription usage/quota windows for an OAuth credential (5h / weekly / …) */
+  'credentials.usage': { input: { id: Id }; result: UsageReport }
 
   // ---- OAuth sign-in ----
   'oauth.begin': { input: { provider: Provider; name?: string }; result: OAuthBegin }

@@ -8,6 +8,7 @@ import { DoodleButton } from '../../components/doodle/DoodleButton'
 import { DoodleToggle } from '../../components/doodle/DoodleToggle'
 import { ProviderBadge, KindBadge, StatusDot } from './badges'
 import { ModelListDialog } from './ModelListDialog'
+import { UsageDialog } from './UsageDialog'
 import { EditCredentialDialog } from './EditCredentialDialog'
 import { ProxyList } from '../proxy/ProxyList'
 import logoUrl from '@assets/logo.png'
@@ -23,6 +24,7 @@ export function CredentialDetail(): JSX.Element {
   useDoodleScrollbar(bodyRef, 'y')
 
   const [models, setModels] = useState(false)
+  const [usage, setUsage] = useState(false)
   const [editing, setEditing] = useState(false)
   const [testing, setTesting] = useState(false)
   // test-result display: success shows green then auto-hides; failure stays red until next test
@@ -33,6 +35,10 @@ export function CredentialDetail(): JSX.Element {
   // on switching credential, seed from its last test: show a prior FAILURE (red), hide a success
   useEffect(() => {
     if (hideTimer.current) clearTimeout(hideTimer.current)
+    // close any per-credential dialogs so they can't linger / auto-reopen for the new credential
+    setModels(false)
+    setUsage(false)
+    setEditing(false)
     const lt = credential?.lastTest
     if (lt && !lt.ok) {
       setTestRes(lt)
@@ -140,6 +146,11 @@ export function CredentialDetail(): JSX.Element {
             <DoodleButton variant="default" onClick={() => setModels(true)}>
               {t('detail.models')}
             </DoodleButton>
+            {credential.kind === 'oauth' && (
+              <DoodleButton variant="default" onClick={() => setUsage(true)}>
+                {t('detail.usage')}
+              </DoodleButton>
+            )}
             <DoodleButton variant="default" onClick={() => setEditing(true)}>
               {t('detail.edit')}
             </DoodleButton>
@@ -155,6 +166,9 @@ export function CredentialDetail(): JSX.Element {
       </div>
 
       <ModelListDialog credentialId={credential.id} open={models} onClose={() => setModels(false)} />
+      {credential.kind === 'oauth' && (
+        <UsageDialog credentialId={credential.id} open={usage} onClose={() => setUsage(false)} />
+      )}
       <EditCredentialDialog credential={credential} open={editing} onClose={() => setEditing(false)} />
     </section>
   )

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { CredentialView } from '@shared/types'
 import type { AppCore } from './context'
 import { toCredentialView, type StoredCredential } from './store'
-import { listModels, testCredential } from './provider/upstream'
+import { fetchUsage, listModels, testCredential } from './provider/upstream'
 import { mt } from './i18n'
 
 function views(core: AppCore): CredentialView[] {
@@ -123,5 +123,11 @@ export function registerCredentialService(core: AppCore): void {
     const c = core.store.data.credentials.find((x) => x.id === id)
     if (!c) throw new Error(mt('err.credNotFound'))
     return listModels(core, c)
+  })
+
+  core.commands.register('credentials.usage', async ({ id }) => {
+    const c = core.store.data.credentials.find((x) => x.id === id)
+    if (!c) throw new Error(mt('err.credNotFound'))
+    return fetchUsage(core, c)
   })
 }

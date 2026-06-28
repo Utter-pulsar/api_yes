@@ -151,6 +151,21 @@ const DICT: Record<string, Entry> = {
   'models.none': { zh: '没有模型', en: 'No models' },
   'models.copied': { zh: '已复制 {id}', en: 'Copied {id}' },
 
+  // ── subscription usage / quota ──
+  'detail.usage': { zh: '📊 订阅额度', en: '📊 Usage' },
+  'usage.title': { zh: '订阅额度', en: 'Subscription usage' },
+  'usage.loading': { zh: '正在查询额度…', en: 'Checking usage…' },
+  'usage.empty': { zh: '暂无额度信息', en: 'No usage info' },
+  'usage.subtitle': { zh: '订阅周期内的用量', en: 'Usage within your subscription windows' },
+  'usage.resetIn': { zh: '{t} 后重置', en: 'Resets in {t}' },
+  'usage.win.5h': { zh: '5 小时用量', en: '5-hour usage' },
+  'usage.win.weekly': { zh: '本周用量', en: 'Weekly usage' },
+  'usage.win.weekly_opus': { zh: '本周 Opus 用量', en: 'Weekly Opus usage' },
+  'usage.win.weekly_sonnet': { zh: '本周 Sonnet 用量', en: 'Weekly Sonnet usage' },
+  'usage.dur.d': { zh: '{n} 天', en: '{n}d' },
+  'usage.dur.h': { zh: '{n} 小时', en: '{n}h' },
+  'usage.dur.m': { zh: '{n} 分钟', en: '{n}m' },
+
   // ── API (proxy) list ──
   'api.title': { zh: 'API 列表', en: 'APIs' },
   'api.new': { zh: '＋ 新建 API', en: '＋ New API' },

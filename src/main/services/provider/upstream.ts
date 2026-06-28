@@ -1,4 +1,5 @@
 import type { ModelInfo, TestResult } from '@shared/types/common'
+import type { UsageReport, UsageWindow } from '@shared/types/usage'
 import type { AppCore } from '../context'
 import { toCredentialView, type OAuthTokens, type StoredCredential } from '../store'
 import { refreshAnthropicToken } from '../oauth/anthropic-oauth'
@@ -261,4 +262,173 @@ export async function testCredential(core: AppCore, cred: StoredCredential): Pro
 function errMsg(e: unknown): string {
   if (e instanceof Error) return e.message
   return String(e)
+}
+
+// ── subscription usage / quota ────────────────────────────────────────────────
+// A current Claude Code client UA. The /api/oauth/usage endpoint drops any request whose
+// User-Agent isn't `claude-code/*` into an aggressively rate-limited bucket → persistent 429
+// (anthropics/claude-code #31021/#31637/#30930), so we override the proxy's claude-cli UA here.
+const CLAUDE_CODE_UA = 'claude-code/2.0.77 (external, api-yes)'
+
+const clampPct = (n: number): number => (isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0)
+
+/** A reset value may be an absolute Unix epoch (seconds, >1e7) or a relative seconds-from-now. */
+function resolveResetMs(raw: string | null): number | undefined {
+  if (raw == null) return undefined
+  const n = Number(raw)
+  if (!isFinite(n) || n <= 0) return undefined
+  return n > 1e7 ? n * 1000 : Date.now() + n * 1000
+}
+
+/** Anthropic unified rate-limit windows from a Messages response's headers (5h/7d/7d_opus/7d_sonnet). */
+function anthropicWindowsFromHeaders(h: Headers): UsageWindow[] {
+  const windows: UsageWindow[] = []
+  const add = (key: string, wire: string): void => {
+    const util = h.get(`anthropic-ratelimit-unified-${wire}-utilization`)
+    if (util == null) return
+    const pct = Number(util)
+    if (!isFinite(pct)) return
+    windows.push({
+      key,
+      percent: clampPct(pct * 100),
+      resetsAt: resolveResetMs(h.get(`anthropic-ratelimit-unified-${wire}-reset`))
+    })
+  }
+  add('5h', '5h')
+  add('weekly', '7d')
+  add('weekly_opus', '7d_opus')
+  add('weekly_sonnet', '7d_sonnet')
+  return windows
+}
+
+interface OAuthUsageWindow {
+  utilization?: number
+  resets_at?: string
+}
+
+async function fetchAnthropicUsage(core: AppCore, cred: StoredCredential, at: number): Promise<UsageReport> {
+  const token = await ensureAccessToken(core, cred)
+
+  // Preferred: the dedicated, zero-cost usage endpoint the Claude Code `/usage` panel calls. It
+  // returns utilization (0..1) + an ISO reset per window; the per-model weekly windows may be absent.
+  try {
+    const res = await fetch(`${new URL(cred.baseUrl).origin}/api/oauth/usage`, {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'user-agent': CLAUDE_CODE_UA
+      }
+    })
+    if (res.ok) {
+      const json = (await res.json()) as Record<string, OAuthUsageWindow | null>
+      const windows: UsageWindow[] = []
+      const add = (key: string, src: string): void => {
+        const o = json[src]
+        if (o && typeof o.utilization === 'number') {
+          windows.push({
+            key,
+            // this endpoint reports utilization ALREADY as a 0..100 percent (NOT the 0..1 fraction
+            // the unified-* response headers use) — so do not multiply here.
+            percent: clampPct(o.utilization),
+            resetsAt: o.resets_at ? Date.parse(o.resets_at) || undefined : undefined
+          })
+        }
+      }
+      add('5h', 'five_hour')
+      add('weekly', 'seven_day')
+      add('weekly_opus', 'seven_day_opus')
+      add('weekly_sonnet', 'seven_day_sonnet')
+      if (windows.length) return { ok: true, provider: 'anthropic', at, windows }
+      // 200 but nothing parseable → fall through to the header probe below (json() drained the body)
+    } else {
+      // release the undici socket on 429/4xx/5xx — the common case is the UA-bucketed 429 above
+      void res.body?.cancel().catch(() => {})
+    }
+  } catch {
+    /* network/parse failure → fall through to the header-based probe */
+  }
+
+  // Fallback: a tiny Haiku message carries the same numbers as anthropic-ratelimit-unified-* headers.
+  // (no `tools` field — tools reclassify an OAuth request into the disabled overage lane and 400.)
+  const res = await directFetch(core, cred, 'POST', '/v1/messages', {
+    model: 'claude-haiku-4-5',
+    max_tokens: 1,
+    messages: [{ role: 'user', content: 'hi' }]
+  })
+  void res.body?.cancel().catch(() => {})
+  if (res.status === 401 || res.status === 403) {
+    return { ok: false, provider: 'anthropic', at, windows: [], message: mt('usage.authFail', { status: res.status }) }
+  }
+  const windows = anthropicWindowsFromHeaders(res.headers)
+  return windows.length
+    ? { ok: true, provider: 'anthropic', at, windows }
+    : { ok: false, provider: 'anthropic', at, windows: [], message: mt('usage.noWindows') }
+}
+
+/** OpenAI Codex rate-limit windows from a /responses call's headers (primary=5h, secondary=weekly). */
+function openaiWindowsFromHeaders(h: Headers): UsageWindow[] {
+  const windows: UsageWindow[] = []
+  const add = (key: string, wire: string): void => {
+    const pct = h.get(`x-codex-${wire}-used-percent`)
+    if (pct == null) return
+    const n = Number(pct)
+    if (!isFinite(n)) return
+    windows.push({ key, percent: clampPct(n), resetsAt: resolveResetMs(h.get(`x-codex-${wire}-reset-at`)) })
+  }
+  add('5h', 'primary')
+  add('weekly', 'secondary')
+  return windows
+}
+
+async function fetchOpenAIUsage(core: AppCore, cred: StoredCredential, at: number): Promise<UsageReport> {
+  // No standalone usage endpoint for the Codex backend — the windows ride on the /responses call as
+  // account-wide x-codex-primary/secondary-* headers (present even when the model itself 400s). We
+  // probe candidate models, cancel the bodies (≈no cost), and read headers off any response that has
+  // them. Same shape as testCredential's connectivity probe.
+  const probe = async (model: string): Promise<Response | null> => {
+    try {
+      const res = await directFetch(core, cred, 'POST', '/v1/responses', {
+        model,
+        instructions: 'You are a helpful assistant.',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+        store: false,
+        stream: true
+      })
+      void res.body?.cancel().catch(() => {})
+      return res
+    } catch {
+      return null
+    }
+  }
+  const responses = (await Promise.all(CODEX_CHATGPT_MODELS.map(probe))).filter(
+    (r): r is Response => r !== null
+  )
+  const withHeaders = responses.find((r) => r.headers.get('x-codex-primary-used-percent') != null)
+  if (withHeaders) {
+    const windows = openaiWindowsFromHeaders(withHeaders.headers)
+    if (windows.length) return { ok: true, provider: 'openai', at, windows }
+  }
+  const authFail = responses.find((r) => r.status === 401 || r.status === 403)
+  if (authFail) {
+    return { ok: false, provider: 'openai', at, windows: [], message: mt('usage.authFail', { status: authFail.status }) }
+  }
+  return { ok: false, provider: 'openai', at, windows: [], message: mt('usage.noWindows') }
+}
+
+/** Read a subscription credential's usage/quota windows (5h / weekly / per-model weekly). */
+export async function fetchUsage(core: AppCore, cred: StoredCredential): Promise<UsageReport> {
+  const at = Date.now()
+  if (cred.kind !== 'oauth') {
+    return { ok: false, provider: cred.provider, at, windows: [], message: mt('usage.onlySub') }
+  }
+  try {
+    return cred.provider === 'anthropic'
+      ? await fetchAnthropicUsage(core, cred, at)
+      : await fetchOpenAIUsage(core, cred, at)
+  } catch (e) {
+    return { ok: false, provider: cred.provider, at, windows: [], message: errMsg(e) }
+  }
 }

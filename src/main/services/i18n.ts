@@ -89,6 +89,11 @@ const DICT: Record<string, Entry> = {
   'up.authFail': { zh: '鉴权失败：令牌无效或已过期 ({status})', en: 'Auth failed: token invalid or expired ({status})' },
   'up.okAuthed': { zh: '连接正常（已鉴权）', en: 'Connected (authenticated)' },
 
+  // ── subscription usage / quota ──
+  'usage.onlySub': { zh: '仅订阅授权支持额度查询', en: 'Usage is only available for subscription credentials' },
+  'usage.authFail': { zh: '鉴权失败：令牌无效或已过期 ({status})', en: 'Auth failed: token invalid or expired ({status})' },
+  'usage.noWindows': { zh: '暂无额度数据（可能尚未产生用量，或当前套餐不提供）', en: 'No usage data (no usage yet, or your plan does not expose it)' },
+
   // ── updater ──
   'update.unsupported': { zh: '当前平台暂不支持自动更新', en: 'Auto-update is not supported on this platform' },
   'update.devMode': { zh: '开发模式下不检查更新', en: 'Updates are not checked in development mode' }
