@@ -10,7 +10,7 @@ import type {
   UsageHistoryStore
 } from '@shared/types'
 import { DEFAULT_SETTINGS, emptyUsageHistory } from '@shared/types'
-import { seedHistoryFromCounters } from './usage-history'
+import { reconcileHistoryWithCounters } from './usage-history'
 import type { TestResult } from '@shared/types/common'
 import type { Provider, CredentialKind, Id } from '@shared/types/common'
 
@@ -132,9 +132,7 @@ export class Store {
     let needsWrite = false
     if (existsSync(path)) {
       try {
-        const r = Store.read(path)
-        db = r.db
-        needsWrite = r.migrated // ledger seeded from pre-upgrade counters → persist it right away
+        db = Store.read(path)
       } catch (e) {
         console.warn('[store] failed to read data file, starting fresh:', e)
         db = emptyDb()
@@ -145,12 +143,15 @@ export class Store {
       mkdirSync(dirname(path), { recursive: true })
       needsWrite = true
     }
+    // self-healing pass, every boot: fold usage the lifetime counters have but the daily ledgers
+    // miss (pre-ledger versions, streams the app was killed inside) so both views stay in step
+    if (reconcileHistoryWithCounters(db)) needsWrite = true
     const store = new Store(path, db)
     if (needsWrite) store.flush()
     return store
   }
 
-  private static read(path: string): { db: Database; migrated: boolean } {
+  private static read(path: string): Database {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as PersistedDB
     const credentials: StoredCredential[] = (raw.credentials ?? []).map((p) => {
       const { secret: _s, enc: _e, ...meta } = p
@@ -164,25 +165,15 @@ export class Store {
       enabled: p.enabled !== false,
       localOnly: p.localOnly !== false
     }))
-    // no usageHistory field at all ⇒ the file was written by a pre-ledger version: seed the daily
-    // ledgers ONCE from the endpoints' lifetime counters (real models from byModel, the rest as
-    // LEGACY_MODEL_KEY, dated to each endpoint's last-used day) so pre-upgrade usage stays visible
-    const migrated = raw.usageHistory == null
-    const usageHistory = migrated
-      ? seedHistoryFromCounters(proxies)
-      : {
-          credentials: raw.usageHistory?.credentials ?? {},
-          proxies: raw.usageHistory?.proxies ?? {}
-        }
     return {
-      db: {
-        version: raw.version ?? SCHEMA_VERSION,
-        settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
-        credentials,
-        proxies,
-        usageHistory
-      },
-      migrated
+      version: raw.version ?? SCHEMA_VERSION,
+      settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
+      credentials,
+      proxies,
+      usageHistory: {
+        credentials: raw.usageHistory?.credentials ?? {},
+        proxies: raw.usageHistory?.proxies ?? {}
+      }
     }
   }
 

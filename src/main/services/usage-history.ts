@@ -1,5 +1,5 @@
-import type { DailyModelUsage, Id, ProxyEndpoint, UsageHistoryStore } from '@shared/types'
-import { LEGACY_MODEL_KEY, UNKNOWN_MODEL_KEY, emptyUsageHistory } from '@shared/types'
+import type { DailyModelUsage, Id, UsageHistoryDays } from '@shared/types'
+import { LEGACY_MODEL_KEY, UNKNOWN_MODEL_KEY } from '@shared/types'
 import type { AppCore } from './context'
 import type { Database } from './store'
 
@@ -48,43 +48,74 @@ export function recordDailyUsage(
   }
 }
 
+/** Sum one scope's ledger: per-model lifetime totals + the grand total (own keys only). */
+function ledgerSums(days: UsageHistoryDays | undefined): {
+  perModel: Map<string, DailyModelUsage>
+  total: DailyModelUsage
+} {
+  const perModel = new Map<string, DailyModelUsage>()
+  const total: DailyModelUsage = { requests: 0, inputTokens: 0, outputTokens: 0 }
+  for (const dayRec of Object.values(days ?? {})) {
+    for (const model of Object.keys(dayRec)) {
+      const u = Object.getOwnPropertyDescriptor(dayRec, model)?.value as DailyModelUsage | undefined
+      if (!u) continue
+      const m = perModel.get(model) ?? { requests: 0, inputTokens: 0, outputTokens: 0 }
+      m.requests += u.requests || 0
+      m.inputTokens += u.inputTokens || 0
+      m.outputTokens += u.outputTokens || 0
+      perModel.set(model, m)
+      total.requests += u.requests || 0
+      total.inputTokens += u.inputTokens || 0
+      total.outputTokens += u.outputTokens || 0
+    }
+  }
+  return { perModel, total }
+}
+
 /**
- * One-time upgrade migration: build the daily ledgers from the lifetime counters of endpoints that
- * existed BEFORE the ledger did (data files with no `usageHistory` at all). Old versions already
- * kept a per-model lifetime breakdown (`usage.byModel`), so that part is attributed to its REAL
- * model names; whatever the top-level counters hold beyond the breakdown (requests whose model
- * never arrived) is folded into the LEGACY_MODEL_KEY pseudo-model. Everything is dated to the
- * endpoint's last-used local day — the closest real date the old data carries — or to today.
+ * Boot-time self-healing: fold into the daily ledgers any usage the lifetime counters hold that
+ * the ledgers don't — usage from app versions before the ledger existed, and tokens billed on a
+ * stream the app was killed in the middle of (counters bill per-delta; the ledger writes once at
+ * request end). Per endpoint: the deficit of each `byModel` entry is seeded under its REAL model
+ * name, the remaining unattributable deficit under LEGACY_MODEL_KEY, dated to the endpoint's
+ * last-used local day (or today). Idempotent — once the ledger covers the counters every deficit
+ * clamps to zero; after a usage reset the counters sit BELOW the ledger and nothing is seeded.
+ * Returns true if anything was written (caller should persist).
  */
-export function seedHistoryFromCounters(proxies: ProxyEndpoint[]): UsageHistoryStore {
-  const store = emptyUsageHistory()
-  for (const p of proxies) {
+export function reconcileHistoryWithCounters(db: Database): boolean {
+  let seeded = false
+  for (const p of db.proxies) {
     const u = p.usage
     if (!u) continue
-    const total = { requests: u.requests || 0, inputTokens: u.inputTokens || 0, outputTokens: u.outputTokens || 0 }
-    if (total.requests + total.inputTokens + total.outputTokens === 0) continue
-    const day = dayKey(u.lastUsedAt ? new Date(u.lastUsedAt) : new Date())
-
-    const attributed = { requests: 0, inputTokens: 0, outputTokens: 0 }
+    const sums = ledgerSums(db.usageHistory.proxies[p.id])
     const entries: Array<[string, DailyModelUsage]> = []
+    const attributed = { requests: 0, inputTokens: 0, outputTokens: 0 }
     for (const [model, m] of Object.entries(u.byModel ?? {})) {
-      const rec = { requests: m.requests || 0, inputTokens: m.inputTokens || 0, outputTokens: m.outputTokens || 0 }
-      if (rec.requests + rec.inputTokens + rec.outputTokens === 0) continue
-      entries.push([model, rec])
-      attributed.requests += rec.requests
-      attributed.inputTokens += rec.inputTokens
-      attributed.outputTokens += rec.outputTokens
+      const have = sums.perModel.get(model)
+      const d: DailyModelUsage = {
+        requests: Math.max(0, (m.requests || 0) - (have?.requests ?? 0)),
+        inputTokens: Math.max(0, (m.inputTokens || 0) - (have?.inputTokens ?? 0)),
+        outputTokens: Math.max(0, (m.outputTokens || 0) - (have?.outputTokens ?? 0))
+      }
+      if (d.requests + d.inputTokens + d.outputTokens === 0) continue
+      entries.push([model, d])
+      attributed.requests += d.requests
+      attributed.inputTokens += d.inputTokens
+      attributed.outputTokens += d.outputTokens
     }
     const rest: DailyModelUsage = {
-      requests: Math.max(0, total.requests - attributed.requests),
-      inputTokens: Math.max(0, total.inputTokens - attributed.inputTokens),
-      outputTokens: Math.max(0, total.outputTokens - attributed.outputTokens)
+      requests: Math.max(0, (u.requests || 0) - sums.total.requests - attributed.requests),
+      inputTokens: Math.max(0, (u.inputTokens || 0) - sums.total.inputTokens - attributed.inputTokens),
+      outputTokens: Math.max(0, (u.outputTokens || 0) - sums.total.outputTokens - attributed.outputTokens)
     }
     if (rest.requests + rest.inputTokens + rest.outputTokens > 0) entries.push([LEGACY_MODEL_KEY, rest])
+    if (entries.length === 0) continue
 
+    seeded = true
+    const day = dayKey(u.lastUsedAt ? new Date(u.lastUsedAt) : new Date())
     for (const [ledger, id] of [
-      [store.proxies, p.id],
-      [store.credentials, p.credentialId]
+      [db.usageHistory.proxies, p.id],
+      [db.usageHistory.credentials, p.credentialId]
     ] as const) {
       const days = (ledger[id] ??= {})
       const dayRec = (days[day] ??= {})
@@ -96,7 +127,7 @@ export function seedHistoryFromCounters(proxies: ProxyEndpoint[]): UsageHistoryS
       }
     }
   }
-  return store
+  return seeded
 }
 
 export function registerUsageHistoryService(core: AppCore): void {
