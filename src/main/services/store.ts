@@ -10,6 +10,7 @@ import type {
   UsageHistoryStore
 } from '@shared/types'
 import { DEFAULT_SETTINGS, emptyUsageHistory } from '@shared/types'
+import { seedHistoryFromCounters } from './usage-history'
 import type { TestResult } from '@shared/types/common'
 import type { Provider, CredentialKind, Id } from '@shared/types/common'
 
@@ -131,7 +132,9 @@ export class Store {
     let needsWrite = false
     if (existsSync(path)) {
       try {
-        db = Store.read(path)
+        const r = Store.read(path)
+        db = r.db
+        needsWrite = r.migrated // ledger seeded from pre-upgrade counters → persist it right away
       } catch (e) {
         console.warn('[store] failed to read data file, starting fresh:', e)
         db = emptyDb()
@@ -147,7 +150,7 @@ export class Store {
     return store
   }
 
-  private static read(path: string): Database {
+  private static read(path: string): { db: Database; migrated: boolean } {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as PersistedDB
     const credentials: StoredCredential[] = (raw.credentials ?? []).map((p) => {
       const { secret: _s, enc: _e, ...meta } = p
@@ -161,15 +164,25 @@ export class Store {
       enabled: p.enabled !== false,
       localOnly: p.localOnly !== false
     }))
+    // no usageHistory field at all ⇒ the file was written by a pre-ledger version: seed the daily
+    // ledgers ONCE from the endpoints' lifetime counters (real models from byModel, the rest as
+    // LEGACY_MODEL_KEY, dated to each endpoint's last-used day) so pre-upgrade usage stays visible
+    const migrated = raw.usageHistory == null
+    const usageHistory = migrated
+      ? seedHistoryFromCounters(proxies)
+      : {
+          credentials: raw.usageHistory?.credentials ?? {},
+          proxies: raw.usageHistory?.proxies ?? {}
+        }
     return {
-      version: raw.version ?? SCHEMA_VERSION,
-      settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
-      credentials,
-      proxies,
-      usageHistory: {
-        credentials: raw.usageHistory?.credentials ?? {},
-        proxies: raw.usageHistory?.proxies ?? {}
-      }
+      db: {
+        version: raw.version ?? SCHEMA_VERSION,
+        settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
+        credentials,
+        proxies,
+        usageHistory
+      },
+      migrated
     }
   }
 

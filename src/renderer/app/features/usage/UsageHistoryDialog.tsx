@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { UsageHistoryDays } from '@shared/types'
-import { UNKNOWN_MODEL_KEY } from '@shared/types'
+import { LEGACY_MODEL_KEY, UNKNOWN_MODEL_KEY } from '@shared/types'
 import { api } from '../../lib/bridge'
 import { useStore } from '../../store'
 import { useT } from '../../lib/i18n'
@@ -203,7 +203,12 @@ export function UsageHistoryDialog({
     const s = stats.slot.get(model)
     return s !== undefined && s < 8 ? SERIES[theme][s] : OTHER_COLOR
   }
-  const labelOf = (model: string): string => (model === UNKNOWN_MODEL_KEY ? t('uh.unknownModel') : model)
+  const labelOf = (model: string): string =>
+    model === UNKNOWN_MODEL_KEY
+      ? t('uh.unknownModel')
+      : model === LEGACY_MODEL_KEY
+        ? t('uh.legacyModel')
+        : model
 
   const dayInfo = (date: Date): DayInfo => {
     const key = dayKeyOf(date)

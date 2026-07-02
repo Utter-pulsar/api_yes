@@ -50,6 +50,13 @@ export interface UsageReport {
  */
 export const UNKNOWN_MODEL_KEY = '(unknown)'
 
+/**
+ * Pseudo-model key for usage accumulated by app versions BEFORE the daily ledger existed and not
+ * attributable to a specific model (the endpoint's lifetime counters minus its byModel breakdown).
+ * Seeded once, on first launch after upgrading. Localized by the renderer like UNKNOWN_MODEL_KEY.
+ */
+export const LEGACY_MODEL_KEY = '(legacy)'
+
 /** One local day's consumption of one model, accumulated request-by-request as the proxy bills. */
 export interface DailyModelUsage {
   requests: number

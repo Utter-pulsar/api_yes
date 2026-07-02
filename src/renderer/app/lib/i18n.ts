@@ -184,6 +184,7 @@ const DICT: Record<string, Entry> = {
   'uh.noUsage': { zh: '这一天没有用量', en: 'No usage this day' },
   'uh.empty': { zh: '这段时间还没有任何用量记录', en: 'Nothing recorded in this period yet' },
   'uh.unknownModel': { zh: '未知模型', en: 'Unknown model' },
+  'uh.legacyModel': { zh: '升级前累计（未区分模型）', en: 'Pre-update total (unattributed)' },
   'uh.less': { zh: '少', en: 'Less' },
   'uh.more': { zh: '多', en: 'More' },
   'uh.dow.mon': { zh: '一', en: 'Mon' },
