@@ -41,3 +41,41 @@ export interface UsageReport {
   /** Human-friendly note: the error on failure, or a hint (e.g. "based on the last request"). */
   message?: string
 }
+
+// ── long-term daily usage history (per credential / per proxy endpoint) ─────────────────────────
+
+/**
+ * Pseudo-model key for requests whose upstream response carried no model id. Kept parenthesised so
+ * it can never collide with a real model id; the renderer maps it to a localized label.
+ */
+export const UNKNOWN_MODEL_KEY = '(unknown)'
+
+/** One local day's consumption of one model, accumulated request-by-request as the proxy bills. */
+export interface DailyModelUsage {
+  requests: number
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * The permanent daily ledger for one scope (a credential or a proxy endpoint):
+ * local-time day 'YYYY-MM-DD' → model id → that day's usage. Only models actually used on a day
+ * appear, and entries survive model-list changes — the history is what happened, not what the
+ * upstream currently offers.
+ */
+export type UsageHistoryDays = Record<string, Record<string, DailyModelUsage>>
+
+/** Everything the `usage.history` query returns for one scope. */
+export interface UsageHistoryReport {
+  days: UsageHistoryDays
+}
+
+/** The persisted store of all ledgers, keyed by credential id and by proxy endpoint id. */
+export interface UsageHistoryStore {
+  credentials: Record<string, UsageHistoryDays>
+  proxies: Record<string, UsageHistoryDays>
+}
+
+export function emptyUsageHistory(): UsageHistoryStore {
+  return { credentials: {}, proxies: {} }
+}

@@ -85,6 +85,8 @@ export function registerProxyService(core: AppCore, server: ProxyServer): void {
   core.commands.register('proxies.delete', ({ id }) => {
     core.store.mutate((db) => {
       db.proxies = db.proxies.filter((p) => p.id !== id)
+      // its daily ledger has no owner left to display it; the credential-level ledger keeps the days
+      delete db.usageHistory.proxies[id]
     })
     changed()
   })

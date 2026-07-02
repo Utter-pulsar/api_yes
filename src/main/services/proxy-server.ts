@@ -5,6 +5,7 @@ import type { AppCore } from './context'
 import { ensureAccessToken, mergeHeaderValue, resolveForward } from './provider/upstream'
 import { createUsageMeter, type ParsedUsage } from './provider/usage'
 import type { StoredCredential } from './store'
+import { recordDailyUsage, usageBucket } from './usage-history'
 import { mt } from './i18n'
 import {
   CODEX_BASE,
@@ -474,13 +475,18 @@ export class ProxyServer {
       if (!p) return
       p.usage.requests += 1
       if (model) {
-        const m = (p.usage.byModel[model] ??= { requests: 0, inputTokens: 0, outputTokens: 0 })
+        // usageBucket, not `??=`: the model id is upstream-controlled ("__proto__" must not
+        // write through to Object.prototype)
+        const m = usageBucket(p.usage.byModel, model)
         m.requests += 1
         if (totals) {
           m.inputTokens += totals.inputTokens
           m.outputTokens += totals.outputTokens
         }
       }
+      // the permanent daily ledger (per endpoint + per credential) — unlike the counters above it
+      // survives usage resets, so "what ran on which day" stays answerable long-term
+      recordDailyUsage(db, p.credentialId, p.id, model, totals ?? { inputTokens: 0, outputTokens: 0 })
       updated = p
     })
     if (updated) this.core.broadcast('proxy.usage', { proxyId, usage: updated.usage })

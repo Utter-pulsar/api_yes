@@ -10,6 +10,7 @@ import type {
   ProxyServerStatus,
   ProxyUsage,
   TestResult,
+  UsageHistoryReport,
   UsageReport
 } from '../types'
 
@@ -31,6 +32,9 @@ export type QueryMap = {
   'proxies.list': { input: { credentialId?: Id }; result: ProxyEndpoint[] }
 
   'proxy.status': { input: void; result: ProxyServerStatus }
+
+  /** the permanent per-day, per-model token ledger of a credential or a single proxy endpoint */
+  'usage.history': { input: { scope: 'credential' | 'proxy'; id: Id }; result: UsageHistoryReport }
 }
 
 /** Self-update progress, pushed main → renderer as `update.status`. */

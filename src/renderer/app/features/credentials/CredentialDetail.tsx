@@ -9,6 +9,7 @@ import { DoodleToggle } from '../../components/doodle/DoodleToggle'
 import { ProviderBadge, KindBadge, StatusDot } from './badges'
 import { ModelListDialog } from './ModelListDialog'
 import { UsageDialog } from './UsageDialog'
+import { UsageHistoryDialog } from '../usage/UsageHistoryDialog'
 import { EditCredentialDialog } from './EditCredentialDialog'
 import { ProxyList } from '../proxy/ProxyList'
 import logoUrl from '@assets/logo.png'
@@ -25,6 +26,7 @@ export function CredentialDetail(): JSX.Element {
 
   const [models, setModels] = useState(false)
   const [usage, setUsage] = useState(false)
+  const [history, setHistory] = useState(false)
   const [editing, setEditing] = useState(false)
   const [testing, setTesting] = useState(false)
   // test-result display: success shows green then auto-hides; failure stays red until next test
@@ -38,6 +40,7 @@ export function CredentialDetail(): JSX.Element {
     // close any per-credential dialogs so they can't linger / auto-reopen for the new credential
     setModels(false)
     setUsage(false)
+    setHistory(false)
     setEditing(false)
     const lt = credential?.lastTest
     if (lt && !lt.ok) {
@@ -146,6 +149,9 @@ export function CredentialDetail(): JSX.Element {
             <DoodleButton variant="default" onClick={() => setModels(true)}>
               {t('detail.models')}
             </DoodleButton>
+            <DoodleButton variant="default" onClick={() => setHistory(true)}>
+              {t('detail.history')}
+            </DoodleButton>
             {credential.kind === 'oauth' && (
               <DoodleButton variant="default" onClick={() => setUsage(true)}>
                 {t('detail.usage')}
@@ -166,6 +172,13 @@ export function CredentialDetail(): JSX.Element {
       </div>
 
       <ModelListDialog credentialId={credential.id} open={models} onClose={() => setModels(false)} />
+      <UsageHistoryDialog
+        scope="credential"
+        id={credential.id}
+        name={credential.name}
+        open={history}
+        onClose={() => setHistory(false)}
+      />
       {credential.kind === 'oauth' && (
         <UsageDialog credentialId={credential.id} open={usage} onClose={() => setUsage(false)} />
       )}

@@ -74,9 +74,12 @@ export function registerCredentialService(core: AppCore): void {
     let removedProxies = false
     core.store.mutate((db) => {
       db.credentials = db.credentials.filter((c) => c.id !== id)
-      const before = db.proxies.length
+      const gone = db.proxies.filter((p) => p.credentialId === id)
       db.proxies = db.proxies.filter((p) => p.credentialId !== id)
-      removedProxies = db.proxies.length !== before
+      removedProxies = gone.length > 0
+      // drop the daily ledgers too — nothing can display them once the credential is gone
+      delete db.usageHistory.credentials[id]
+      for (const p of gone) delete db.usageHistory.proxies[p.id]
     })
     broadcastCredentials(core)
     if (removedProxies) broadcastProxies(core)

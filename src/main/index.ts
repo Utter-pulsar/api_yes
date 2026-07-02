@@ -7,6 +7,7 @@ import { Store } from './services/store'
 import { createAppCore } from './services/context'
 import { registerCredentialService } from './services/credential-service'
 import { registerProxyService } from './services/proxy-service'
+import { registerUsageHistoryService } from './services/usage-history'
 import { registerOAuthService } from './services/oauth-service'
 import { registerUpdater } from './services/updater'
 import { ProxyServer } from './services/proxy-server'
@@ -39,6 +40,7 @@ app.whenReady().then(() => {
 
   // services register their query/command handlers
   registerCredentialService(core)
+  registerUsageHistoryService(core)
   registerOAuthService(core)
   registerUpdater(core)
 

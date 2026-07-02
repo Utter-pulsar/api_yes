@@ -6,6 +6,7 @@ import { useT } from '../../lib/i18n'
 import { compact, grouped, ago } from '../../lib/format'
 import { DoodleButton } from '../../components/doodle/DoodleButton'
 import { DoodleToggle } from '../../components/doodle/DoodleToggle'
+import { UsageHistoryDialog } from '../usage/UsageHistoryDialog'
 
 /** The API keys hanging off one credential. Each key has its OWN URL + access scope + usage. */
 export function ProxyList({ credential }: { credential: CredentialView }): JSX.Element {
@@ -21,6 +22,11 @@ export function ProxyList({ credential }: { credential: CredentialView }): JSX.E
   const askPrompt = useStore((s) => s.askPrompt)
   const t = useT()
   const [creating, setCreating] = useState(false)
+  // the endpoint whose usage-history dialog is open. Held HERE (not in the card): the card's
+  // .doodle-edge applies a CSS filter, which would become the containing block for the dialog's
+  // position:fixed overlay and trap it inside the card.
+  const [historyId, setHistoryId] = useState<string | null>(null)
+  const historyProxy = proxies.find((p) => p.id === historyId)
 
   const create = async (): Promise<void> => {
     const name = await askPrompt(t('api.namePrompt'), t('api.defaultName', { n: proxies.length + 1 }))
@@ -55,9 +61,23 @@ export function ProxyList({ credential }: { credential: CredentialView }): JSX.E
         </div>
       ) : (
         proxies.map((p) => (
-          <ProxyCard key={p.id} proxy={p} provider={credential.provider} status={status} />
+          <ProxyCard
+            key={p.id}
+            proxy={p}
+            provider={credential.provider}
+            status={status}
+            onHistory={() => setHistoryId(p.id)}
+          />
         ))
       )}
+
+      <UsageHistoryDialog
+        scope="proxy"
+        id={historyId}
+        name={historyProxy?.name ?? ''}
+        open={historyId !== null}
+        onClose={() => setHistoryId(null)}
+      />
     </div>
   )
 }
@@ -65,11 +85,13 @@ export function ProxyList({ credential }: { credential: CredentialView }): JSX.E
 function ProxyCard({
   proxy,
   provider,
-  status
+  status,
+  onHistory
 }: {
   proxy: ProxyEndpoint
   provider: CredentialView['provider']
   status: ProxyServerStatus
+  onHistory: () => void
 }): JSX.Element {
   const toast = useStore((s) => s.toast)
   const askPrompt = useStore((s) => s.askPrompt)
@@ -228,6 +250,7 @@ function ProxyCard({
       ) : null}
 
       <div className="flex flex-wrap gap-1.5 text-xs">
+        <Mini onClick={onHistory}>{t('api.history')}</Mini>
         <Mini onClick={() => void setLimit()}>{proxy.limitTotalTokens ? t('api.changeLimit') : t('api.setLimit')}</Mini>
         <Mini onClick={() => void editKey()}>{t('api.customKey')}</Mini>
         <Mini onClick={() => void regen()}>{t('api.regen')}</Mini>

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
 import type { AppSettings } from '@shared/types'
 import { api } from '../lib/bridge'
 import { useStore } from '../store'
@@ -28,7 +29,14 @@ function SettingRow({
   )
 }
 
-/** Reverse-proxy server section: port, autostart, start/stop, and live state. */
+/**
+ * Reverse-proxy server section: port, autostart, start/stop, and live state.
+ *
+ * The body is COLLAPSED at rest and peeks open on hover; a click anywhere inside pins it open
+ * (so hovering away no longer closes it). It unpins + collapses on the header's fold button or on
+ * any click outside the box (still within the settings dialog). The fold button also suppresses
+ * hover-reopen until the pointer leaves, so it visibly closes even while still hovered.
+ */
 function ProxyServerSection({
   settings,
   update
@@ -40,6 +48,22 @@ function ProxyServerSection({
   const t = useT()
   const [port, setPort] = useState(String(settings?.proxyPort ?? 8788))
   const [busy, setBusy] = useState(false)
+
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [pinned, setPinned] = useState(false)
+  const [hover, setHover] = useState(false)
+  const [suppressHover, setSuppressHover] = useState(false)
+  const open = pinned || (hover && !suppressHover)
+
+  // while pinned, any pointer-down outside the box (dialog, scrim, anywhere) unpins it
+  useEffect(() => {
+    if (!pinned) return
+    const onDown = (e: MouseEvent): void => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setPinned(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [pinned])
 
   useEffect(() => {
     if (settings) setPort(String(settings.proxyPort))
@@ -55,46 +79,95 @@ function ProxyServerSection({
     }
   }
 
+  const fold = (e: React.MouseEvent): void => {
+    e.stopPropagation() // don't let the box's own pin-on-click swallow the fold
+    if (open) {
+      setPinned(false)
+      setSuppressHover(true) // stay closed while the pointer is still over the box
+    } else {
+      setPinned(true)
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-2 rounded-[10px] border-2 border-ink/30 p-3">
-      <div className="flex items-center justify-between">
+    <div
+      ref={boxRef}
+      className="flex flex-col rounded-[10px] border-2 border-ink/30 p-3"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false)
+        setSuppressHover(false)
+      }}
+      onMouseDown={() => setPinned(true)}
+    >
+      <div className="flex items-center justify-between gap-2">
         <span className="text-base">{t('settings.apiServer')}</span>
-        <span className={`mono text-xs ${status.running ? 'text-marker-green' : 'text-ink/45'}`}>
-          {status.running
-            ? t('settings.running', { p: status.port })
-            : status.error
-              ? t('settings.startFailed')
-              : t('settings.stopped')}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`mono text-xs ${status.running ? 'text-marker-green' : 'text-ink/45'}`}>
+            {status.running
+              ? t('settings.running', { p: status.port })
+              : status.error
+                ? t('settings.startFailed')
+                : t('settings.stoppedPort', { p: status.port })}
+          </span>
+          <button
+            onMouseDown={(e) => e.stopPropagation()} /* keep the box's pin-on-mousedown out of it */
+            onClick={fold} /* click-driven so Enter/Space work too */
+            aria-expanded={open}
+            title={open ? t('settings.collapse') : t('settings.expand')}
+            className="rounded-[6px] border-2 border-ink/30 px-1.5 py-0.5 text-xs leading-none hover:bg-ink/5"
+          >
+            <motion.span
+              className="inline-block"
+              animate={{ rotate: open ? 90 : 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+            >
+              ▸
+            </motion.span>
+          </button>
+        </div>
       </div>
-      {status.error && <span className="text-xs text-marker-coral">{status.error}</span>}
-      <label className="flex flex-col gap-1">
-        <span className="text-sm opacity-70">{t('settings.port')}</span>
-        <input
-          className={`${fieldCls} mono w-32`}
-          inputMode="numeric"
-          value={port}
-          onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))}
-          onBlur={() => {
-            const p = Math.min(65535, Math.max(1, Number(port) || 8788))
-            setPort(String(p))
-            update({ proxyPort: p })
-          }}
-        />
-      </label>
-      <span className="text-xs opacity-45">{t('settings.bindHint')}</span>
-      <div className="mt-1 flex items-center gap-2">
-        <DoodleButton variant={status.running ? 'danger' : 'primary'} disabled={busy} onClick={() => void toggle()}>
-          {status.running ? t('settings.stop') : t('settings.start')}
-        </DoodleButton>
-      </div>
-      <SettingRow label={t('settings.autostart')} hint={t('settings.autostartHint')}>
-        <DoodleToggle
-          label={t('settings.autostart')}
-          checked={!!settings?.proxyAutoStart}
-          onChange={(v) => update({ proxyAutoStart: v })}
-        />
-      </SettingRow>
+
+      <motion.div
+        initial={false}
+        // height:0 + overflow-hidden hides but does NOT unfocus — inert keeps the collapsed port
+        // input / buttons out of the tab order so they can't be edited invisibly
+        inert={!open}
+        animate={open ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+        className="overflow-hidden"
+      >
+        <div className="flex flex-col gap-2 pt-2">
+          {status.error && <span className="text-xs text-marker-coral">{status.error}</span>}
+          <label className="flex flex-col gap-1">
+            <span className="text-sm opacity-70">{t('settings.port')}</span>
+            <input
+              className={`${fieldCls} mono w-32`}
+              inputMode="numeric"
+              value={port}
+              onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))}
+              onBlur={() => {
+                const p = Math.min(65535, Math.max(1, Number(port) || 8788))
+                setPort(String(p))
+                update({ proxyPort: p })
+              }}
+            />
+          </label>
+          <span className="text-xs opacity-45">{t('settings.bindHint')}</span>
+          <div className="mt-1 flex items-center gap-2">
+            <DoodleButton variant={status.running ? 'danger' : 'primary'} disabled={busy} onClick={() => void toggle()}>
+              {status.running ? t('settings.stop') : t('settings.start')}
+            </DoodleButton>
+          </div>
+          <SettingRow label={t('settings.autostart')} hint={t('settings.autostartHint')}>
+            <DoodleToggle
+              label={t('settings.autostart')}
+              checked={!!settings?.proxyAutoStart}
+              onChange={(v) => update({ proxyAutoStart: v })}
+            />
+          </SettingRow>
+        </div>
+      </motion.div>
     </div>
   )
 }

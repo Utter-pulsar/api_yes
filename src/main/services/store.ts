@@ -6,9 +6,10 @@ import type {
   AppSettings,
   CredentialView,
   OAuthAccount,
-  ProxyEndpoint
+  ProxyEndpoint,
+  UsageHistoryStore
 } from '@shared/types'
-import { DEFAULT_SETTINGS } from '@shared/types'
+import { DEFAULT_SETTINGS, emptyUsageHistory } from '@shared/types'
 import type { TestResult } from '@shared/types/common'
 import type { Provider, CredentialKind, Id } from '@shared/types/common'
 
@@ -51,6 +52,8 @@ export interface Database {
   settings: AppSettings
   credentials: StoredCredential[]
   proxies: ProxyEndpoint[]
+  /** permanent per-day, per-model token ledgers (kept across model-list changes and usage resets) */
+  usageHistory: UsageHistoryStore
 }
 
 const SCHEMA_VERSION = 1
@@ -67,10 +70,17 @@ interface PersistedDB {
   settings: AppSettings
   credentials: PersistedCredential[]
   proxies: ProxyEndpoint[]
+  usageHistory?: UsageHistoryStore
 }
 
 function emptyDb(): Database {
-  return { version: SCHEMA_VERSION, settings: { ...DEFAULT_SETTINGS }, credentials: [], proxies: [] }
+  return {
+    version: SCHEMA_VERSION,
+    settings: { ...DEFAULT_SETTINGS },
+    credentials: [],
+    proxies: [],
+    usageHistory: emptyUsageHistory()
+  }
 }
 
 // ---- secret (de)serialization ----
@@ -155,7 +165,11 @@ export class Store {
       version: raw.version ?? SCHEMA_VERSION,
       settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
       credentials,
-      proxies
+      proxies,
+      usageHistory: {
+        credentials: raw.usageHistory?.credentials ?? {},
+        proxies: raw.usageHistory?.proxies ?? {}
+      }
     }
   }
 
@@ -178,6 +192,7 @@ export class Store {
       version: this.db.version,
       settings: this.db.settings,
       proxies: this.db.proxies,
+      usageHistory: this.db.usageHistory,
       credentials: this.db.credentials.map((c) => {
         const { apiKey: _a, oauth: _o, ...meta } = c
         return { ...meta, ...encodeSecret(c) }
