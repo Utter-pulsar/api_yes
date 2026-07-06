@@ -33,8 +33,14 @@ export type QueryMap = {
 
   'proxy.status': { input: void; result: ProxyServerStatus }
 
-  /** the permanent per-day, per-model token ledger of a credential or a single proxy endpoint */
-  'usage.history': { input: { scope: 'credential' | 'proxy'; id: Id }; result: UsageHistoryReport }
+  /**
+   * The permanent per-day, per-model token ledger of one scope, plus (for app/credential scopes)
+   * the breakdown list of its lower-level records — live and historical (tombstoned) alike.
+   */
+  'usage.history': {
+    input: { scope: 'app' } | { scope: 'credential' | 'proxy'; id: Id }
+    result: UsageHistoryReport
+  }
 }
 
 /** Self-update progress, pushed main → renderer as `update.status`. */
@@ -117,6 +123,22 @@ export type CommandMap = {
   'proxies.resetUsage': { input: { id: Id }; result: ProxyEndpoint }
   /** generate a fresh provider-styled key WITHOUT saving (for the create form's "骰子") */
   'proxies.suggestKey': { input: { credentialId: Id }; result: { key: string } }
+
+  // ---- usage history tree (permanent ledger management) ----
+  /**
+   * Purge one record from a parent's breakdown list. Unlike deleting the entity (which only
+   * tombstones the record), this removes its contribution — every ancestor total shrinks.
+   */
+  'usage.history.deleteEntry': {
+    input:
+      | { kind: 'credential'; credentialId: Id }
+      | { kind: 'proxy'; credentialId: Id; proxyId: Id }
+      /** clear an unattributed-surplus bucket; app-level one when credentialId is omitted */
+      | { kind: 'legacy'; credentialId?: Id }
+    result: void
+  }
+  /** rename a historical (tombstoned) entry's display name */
+  'usage.history.renameEntry': { input: { credentialId: Id; proxyId?: Id; name: string }; result: void }
 
   // ---- the local reverse-proxy server ----
   'proxy.start': { input: void; result: ProxyServerStatus }

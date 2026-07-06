@@ -72,17 +72,82 @@ export interface DailyModelUsage {
  */
 export type UsageHistoryDays = Record<string, Record<string, DailyModelUsage>>
 
-/** Everything the `usage.history` query returns for one scope. */
-export interface UsageHistoryReport {
+/** Lifetime sums of one ledger, shown as a child entry's numbers in a parent's breakdown list. */
+export interface UsageTotals {
+  requests: number
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * Pseudo-id for the synthetic "unattributed surplus" child entry in a breakdown list: usage a
+ * parent level accumulated that can no longer be attributed to a named child (pre-tree app
+ * versions). Parenthesised so it can never collide with a real credential/proxy id.
+ */
+export const LEGACY_ENTRY_KEY = '(legacy)'
+
+// ── the persisted history tree: app → credentials → api keys ────────────────────────────────────
+//
+// Totals at each level are DERIVED: a credential's ledger = its legacyDays + Σ its proxy nodes,
+// the app ledger = its legacyDays + Σ credential nodes. Deleting an ENTITY (credential / api key)
+// only tombstones its node (`deleted: true`) — every ancestor total is unchanged. Only purging a
+// node from its parent's breakdown list (usage.history.deleteEntry) removes its contribution,
+// which then shrinks every ancestor consistently.
+
+/** api-key (proxy endpoint) leaf node — the only level whose days are stored, not derived. */
+export interface ProxyHistoryNode {
+  /** last-known display name (kept for tombstoned entries) */
+  name: string
+  /** true once the api-key entity was deleted; the record lives on as a historical entry */
+  deleted: boolean
   days: UsageHistoryDays
 }
 
-/** The persisted store of all ledgers, keyed by credential id and by proxy endpoint id. */
+export interface CredentialHistoryNode {
+  name: string
+  deleted: boolean
+  /** unattributed usage: pre-upgrade surplus of the old credential ledger over Σ its api keys */
+  legacyDays: UsageHistoryDays
+  proxies: Record<string, ProxyHistoryNode>
+}
+
+export interface UsageHistoryTree {
+  /** unattributed app-level usage (orphaned pre-upgrade ledgers) */
+  legacyDays: UsageHistoryDays
+  credentials: Record<string, CredentialHistoryNode>
+}
+
+export function emptyUsageHistoryTree(): UsageHistoryTree {
+  return { legacyDays: {}, credentials: {} }
+}
+
+/**
+ * The persisted shape BEFORE the history tree (≤ v0.0.7): two flat ledger maps. Read once by the
+ * store's migration and folded into a UsageHistoryTree; never written again.
+ */
 export interface UsageHistoryStore {
   credentials: Record<string, UsageHistoryDays>
   proxies: Record<string, UsageHistoryDays>
 }
 
-export function emptyUsageHistory(): UsageHistoryStore {
-  return { credentials: {}, proxies: {} }
+// ── what the `usage.history` query returns ──────────────────────────────────────────────────────
+
+/** One row of a parent scope's breakdown list (its lower-level records, live + historical). */
+export interface UsageHistoryChildEntry {
+  /** credential/proxy id, or LEGACY_ENTRY_KEY for the synthetic surplus row */
+  id: string
+  name: string
+  /** entity is gone — render as a historical entry */
+  deleted: boolean
+  /** the synthetic unattributed-surplus row: not drillable, renderer supplies its label */
+  legacy?: boolean
+  totals: UsageTotals
+}
+
+/** Everything the `usage.history` query returns for one scope. */
+export interface UsageHistoryReport {
+  /** the (derived) per-day per-model ledger of the requested scope */
+  days: UsageHistoryDays
+  /** app scope → credential entries; credential scope → api-key entries; proxy scope → omitted */
+  children?: UsageHistoryChildEntry[]
 }

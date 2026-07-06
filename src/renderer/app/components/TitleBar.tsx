@@ -4,21 +4,25 @@ import { api } from '../lib/bridge'
 import { useStore } from '../store'
 import { useT } from '../lib/i18n'
 import { DoodleBox } from './doodle/DoodleBox'
+import { DoodleButton } from './doodle/DoodleButton'
 import { ModalScrim } from './ModalScrim'
 import { SettingsDialog } from './SettingsDialog'
+import { CodexModelsDialog } from './CodexModelsDialog'
+import { UpdateProgress } from './UpdateProgress'
 import { Wordmark } from './Wordmark'
 import logoUrl from '@assets/logo.png'
-import logoMarkUrl from '@assets/logo-mark.png' // knot cropped to its art, for the title-bar lockup
+import logoMarkUrl from '@assets/logo-mark.png' // knot cropped to its art, for the header lockup
 
-type MenuDialog = 'settings' | 'about' | null
+type MenuDialog = 'settings' | 'codexModels' | 'about' | null
 
 const TITLEBAR_H = 44
 
 /**
- * The integrated window title bar: a hamburger menu + the window controls. On Win/Linux the window
- * is frameless, so we draw our own hand-drawn min/max/close on the RIGHT; on macOS the native
- * traffic lights sit top-left, so the hamburger moves right. The 版本 item pops a Q-bouncy About
- * card with 检查更新.
+ * The window top: TWO rows. Row 1 is the 44px draggable strip — just the hamburger menu and the
+ * window controls (on Win/Linux the window is frameless, so we draw our own hand-drawn
+ * min/max/close on the RIGHT; on macOS the native traffic lights sit top-left, so the hamburger
+ * moves right). Row 2 is a non-drag app header: logo + wordmark (with the self-update status line
+ * tucked under it) and the theme toggle. The 版本 item pops a Q-bouncy About card with 检查更新.
  */
 export function TitleBar(): JSX.Element {
   const isMac = window.platform === 'darwin'
@@ -80,11 +84,22 @@ export function TitleBar(): JSX.Element {
           </svg>
         </button>
 
-        <img src={logoMarkUrl} alt="" className="app-no-drag h-5 w-auto select-none" draggable={false} />
-        <Wordmark height={20} className="select-none text-ink" />
-
         {!isMac && <WindowControls />}
       </div>
+
+      {/* app header (not draggable): lockup + update status, theme toggle on the right */}
+      <header className="flex shrink-0 items-center gap-3 border-b-2 border-ink/80 px-5 py-3">
+        <img src={logoMarkUrl} alt="" className="h-8 w-auto select-none" draggable={false} />
+        <div className="flex flex-col">
+          <Wordmark height={22} className="select-none text-ink" />
+          <UpdateProgress />
+        </div>
+        <div className="ml-auto">
+          <DoodleButton onClick={toggleTheme} title={t('header.themeToggle')}>
+            {t(theme === 'dark' ? 'header.themeDark' : 'header.themeLight')}
+          </DoodleButton>
+        </div>
+      </header>
 
       {/* dropdown under the hamburger */}
       <AnimatePresence>
@@ -107,7 +122,7 @@ export function TitleBar(): JSX.Element {
                 {(
                   [
                     { id: 'settings', label: t('menu.settings') },
-                    { id: 'theme', label: theme === 'dark' ? t('menu.themeLight') : t('menu.themeDark') },
+                    { id: 'codexModels', label: t('menu.codexModels') },
                     { id: 'about', label: t('menu.about') }
                   ] as const
                 ).map((item) => (
@@ -115,8 +130,7 @@ export function TitleBar(): JSX.Element {
                     key={item.id}
                     onClick={() => {
                       setMenuOpen(false)
-                      if (item.id === 'theme') toggleTheme()
-                      else setDialog(item.id)
+                      setDialog(item.id)
                     }}
                     className="flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-base hover:bg-marker-yellow/40"
                   >
@@ -176,6 +190,7 @@ export function TitleBar(): JSX.Element {
       </AnimatePresence>
 
       <SettingsDialog open={dialog === 'settings'} onClose={() => setDialog(null)} />
+      <CodexModelsDialog open={dialog === 'codexModels'} onClose={() => setDialog(null)} />
     </>
   )
 }

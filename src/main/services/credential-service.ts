@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { CredentialView } from '@shared/types'
 import type { AppCore } from './context'
 import { toCredentialView, type StoredCredential } from './store'
+import { getCredentialNode } from './usage-history'
 import { fetchUsage, listModels, testCredential } from './provider/upstream'
 import { mt } from './i18n'
 
@@ -58,7 +59,12 @@ export function registerCredentialService(core: AppCore): void {
     core.store.mutate((db) => {
       const c = db.credentials.find((x) => x.id === id)
       if (!c) return
-      if (patch.name !== undefined) c.name = patch.name.trim() || c.name
+      if (patch.name !== undefined) {
+        c.name = patch.name.trim() || c.name
+        // keep the history record's display name in step with the live entity
+        const node = getCredentialNode(db.usageHistory, id)
+        if (node) node.name = c.name
+      }
       if (patch.baseUrl !== undefined) c.baseUrl = patch.baseUrl.trim()
       if (patch.apiKey !== undefined && patch.apiKey.trim()) c.apiKey = patch.apiKey.trim()
       if (patch.enabled !== undefined) c.enabled = patch.enabled
@@ -77,9 +83,13 @@ export function registerCredentialService(core: AppCore): void {
       const gone = db.proxies.filter((p) => p.credentialId === id)
       db.proxies = db.proxies.filter((p) => p.credentialId !== id)
       removedProxies = gone.length > 0
-      // drop the daily ledgers too — nothing can display them once the credential is gone
-      delete db.usageHistory.credentials[id]
-      for (const p of gone) delete db.usageHistory.proxies[p.id]
+      // the daily ledgers survive as tombstones — app totals must not change on entity deletion;
+      // the keys die with the credential, so their leaves tombstone too
+      const node = getCredentialNode(db.usageHistory, id)
+      if (node) {
+        node.deleted = true
+        for (const pid of Object.keys(node.proxies)) node.proxies[pid].deleted = true
+      }
     })
     broadcastCredentials(core)
     if (removedProxies) broadcastProxies(core)

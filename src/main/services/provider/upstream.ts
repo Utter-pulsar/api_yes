@@ -1,12 +1,24 @@
 import type { ModelInfo, TestResult } from '@shared/types/common'
 import type { UsageReport, UsageWindow } from '@shared/types/usage'
+import { DEFAULT_CODEX_MODELS } from '@shared/types/settings'
 import type { AppCore } from '../context'
 import { toCredentialView, type OAuthTokens, type StoredCredential } from '../store'
 import { refreshAnthropicToken } from '../oauth/anthropic-oauth'
 import { refreshOpenAIToken } from '../oauth/openai-oauth'
 import { claudeCodeTransform, joinUpstream, openaiUsageTransform } from './forward-util'
-import { CODEX_BASE, CODEX_CHATGPT_MODELS, codexHeaders } from './codex'
+import { CODEX_BASE, codexHeaders } from './codex'
 import { mt, listJoin } from '../i18n'
+
+/**
+ * The Codex-on-ChatGPT model list: user-curated in settings (there's no public list endpoint —
+ * as of 2026-06 e.g. gpt-5 / gpt-5.2-codex are rejected for ChatGPT accounts), ordered
+ * cheapest-first for the connectivity probes. Empty/missing falls back to the shipped defaults so
+ * probes are never vacuous. Read at call time; NEVER mutate the returned array.
+ */
+export function codexModels(core: AppCore): string[] {
+  const list = core.store.data.settings.codexModels
+  return Array.isArray(list) && list.length > 0 ? list : DEFAULT_CODEX_MODELS
+}
 
 export interface ForwardTarget {
   url: string
@@ -153,10 +165,11 @@ export async function listModels(
 ): Promise<{ ok: boolean; models: ModelInfo[]; message: string }> {
   if (cred.provider === 'openai' && cred.kind === 'oauth') {
     // no public list endpoint for the Codex backend → return the curated Codex-on-ChatGPT set
+    const models = codexModels(core)
     return {
       ok: true,
-      models: CODEX_CHATGPT_MODELS.map((id) => ({ id, label: 'Codex' })),
-      message: mt('up.codexModels', { n: CODEX_CHATGPT_MODELS.length })
+      models: models.map((id) => ({ id, label: 'Codex' })),
+      message: mt('up.codexModels', { n: models.length })
     }
   }
   const path = '/v1/models'
@@ -220,7 +233,7 @@ export async function testCredential(core: AppCore, cred: StoredCredential): Pro
         return { model, ok: false, err: errMsg(e) }
       }
     }
-    const probes = await Promise.all(CODEX_CHATGPT_MODELS.map(probe))
+    const probes = await Promise.all(codexModels(core).map(probe))
     const authFail = probes.find((p) => p.status === 401 || p.status === 403)
     if (authFail) {
       return { ok: false, at, message: mt('up.authFailRelogin', { status: authFail.status ?? '' }), status: authFail.status }
@@ -403,7 +416,7 @@ async function fetchOpenAIUsage(core: AppCore, cred: StoredCredential, at: numbe
       return null
     }
   }
-  const responses = (await Promise.all(CODEX_CHATGPT_MODELS.map(probe))).filter(
+  const responses = (await Promise.all(codexModels(core).map(probe))).filter(
     (r): r is Response => r !== null
   )
   const withHeaders = responses.find((r) => r.headers.get('x-codex-primary-used-percent') != null)

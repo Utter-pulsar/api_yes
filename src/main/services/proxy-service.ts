@@ -3,6 +3,7 @@ import { clipboard } from 'electron'
 import { emptyUsage, type ProxyEndpoint } from '@shared/types'
 import type { AppCore } from './context'
 import type { ProxyServer } from './proxy-server'
+import { getProxyLeaf } from './usage-history'
 import { generateProxyKey } from './keygen'
 import { mt } from './i18n'
 
@@ -68,7 +69,12 @@ export function registerProxyService(core: AppCore, server: ProxyServer): void {
     core.store.mutate((db) => {
       const p = db.proxies.find((x) => x.id === id)
       if (!p) return
-      if (patch.name !== undefined) p.name = patch.name.trim() || p.name
+      if (patch.name !== undefined) {
+        p.name = patch.name.trim() || p.name
+        // keep the history record's display name in step with the live entity
+        const leaf = getProxyLeaf(db.usageHistory, p.credentialId, p.id)
+        if (leaf) leaf.name = p.name
+      }
       if (patch.key !== undefined && patch.key.trim()) p.key = patch.key.trim()
       if (patch.enabled !== undefined) p.enabled = patch.enabled
       if (patch.localOnly !== undefined) p.localOnly = patch.localOnly
@@ -84,9 +90,12 @@ export function registerProxyService(core: AppCore, server: ProxyServer): void {
 
   core.commands.register('proxies.delete', ({ id }) => {
     core.store.mutate((db) => {
-      db.proxies = db.proxies.filter((p) => p.id !== id)
-      // its daily ledger has no owner left to display it; the credential-level ledger keeps the days
-      delete db.usageHistory.proxies[id]
+      // locate the history leaf via the entity's credentialId BEFORE the entity disappears
+      const p = db.proxies.find((x) => x.id === id)
+      db.proxies = db.proxies.filter((x) => x.id !== id)
+      // the daily ledger survives as a tombstone — the credential's total must not change here
+      const leaf = p ? getProxyLeaf(db.usageHistory, p.credentialId, p.id) : undefined
+      if (leaf) leaf.deleted = true
     })
     changed()
   })

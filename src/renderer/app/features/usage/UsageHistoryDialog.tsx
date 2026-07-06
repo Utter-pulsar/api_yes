@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
-import type { UsageHistoryDays } from '@shared/types'
+import { AnimatePresence, motion } from 'framer-motion'
+import type { UsageHistoryChildEntry, UsageHistoryDays } from '@shared/types'
 import { LEGACY_MODEL_KEY, UNKNOWN_MODEL_KEY } from '@shared/types'
 import { api } from '../../lib/bridge'
 import { useStore } from '../../store'
 import { useT } from '../../lib/i18n'
 import { compact, grouped } from '../../lib/format'
 import { DialogShell } from '../../components/DialogShell'
+import { DoodleCalendar } from '../../components/doodle/DoodleCalendar'
 
 /**
  * Chart palettes validated with the dataviz six checks (CVD ΔE, lightness band, chroma, contrast)
@@ -31,9 +32,18 @@ const HEAT_WEEKS = 27 // 26 full weeks + the current partial one ⇒ ≥183 days
 const BAR_DAYS = 30
 const TT_W = 220 // tooltip width
 
-type ViewMode = 'heat' | 'bars'
+// ── drag-to-pan tuning (simplified elastic drag: slop → PITCH-quantised steps → rubber-band) ──
+const SLOP = 5 // px of pointer travel before a press becomes a pan (clicks/hovers stay cheap)
+const MAX_OVER = 40 // px of rubber-band give past either end of the pannable range
+/** Overscroll resistance: ~linear near 0, asymptotically approaching MAX_OVER — never a hard wall. */
+const resist = (x: number): number => MAX_OVER * (1 - 1 / (x / MAX_OVER + 1))
+
+type ViewMode = 'heat' | 'bars' | 'list'
 const MODE_KEY = 'api-yes-usage-history-view'
-const readMode = (): ViewMode => (localStorage.getItem(MODE_KEY) === 'bars' ? 'bars' : 'heat')
+const readMode = (): ViewMode => {
+  const v = localStorage.getItem(MODE_KEY)
+  return v === 'bars' || v === 'list' ? v : 'heat'
+}
 
 // ── local-day helpers (the ledger is keyed by LOCAL 'YYYY-MM-DD', matching the main process) ──
 const dayKeyOf = (d: Date): string => {
@@ -42,6 +52,20 @@ const dayKeyOf = (d: Date): string => {
 }
 const addDays = (d: Date, n: number): Date => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
 const mondayOf = (d: Date): Date => addDays(d, -((d.getDay() + 6) % 7))
+// 'YYYY-MM-DDT00:00:00' (no zone suffix) parses as LOCAL midnight
+const parseKey = (key: string): Date => new Date(`${key}T00:00:00`)
+const keyAddDays = (key: string, n: number): string => dayKeyOf(addDays(parseKey(key), n))
+/** Whole days a → b; rounded so DST's 23/25-hour days can't skew the count. */
+const dayDiff = (a: string, b: string): number =>
+  Math.round((parseKey(b).getTime() - parseKey(a).getTime()) / 86_400_000)
+
+type HistoryScope = 'app' | 'credential' | 'proxy'
+/** One level of the drill-down stack: whose ledger the dialog currently shows. */
+interface Frame {
+  scope: HistoryScope
+  id: string | null // null only for the app scope
+  name: string
+}
 
 interface DayEntry {
   model: string
@@ -64,6 +88,17 @@ interface Tip {
   info: DayInfo
 }
 
+/** Pointer-pan wiring the parent hands each chart (handlers live up top; charts just attach). */
+interface PanProps {
+  className: string
+  title: string | undefined
+  svgRef: React.MutableRefObject<SVGSVGElement | null>
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void
+  onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void
+  onPointerUp: () => void
+  onPointerCancel: () => void
+}
+
 export function UsageHistoryDialog({
   scope,
   id,
@@ -71,7 +106,7 @@ export function UsageHistoryDialog({
   open,
   onClose
 }: {
-  scope: 'credential' | 'proxy'
+  scope: HistoryScope
   id: string | null
   name: string
   open: boolean
@@ -81,13 +116,25 @@ export function UsageHistoryDialog({
   const lang = useStore((s) => s.lang)
   const theme = useStore((s) => s.theme)
   const proxies = useStore((s) => s.proxies)
+  const toast = useStore((s) => s.toast)
+  const askPrompt = useStore((s) => s.askPrompt)
+  const askConfirm = useStore((s) => s.askConfirm)
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US'
 
+  // ── drill-down navigation: a stack of frames, seeded from the entry-point props on open ──
+  const [stack, setStack] = useState<Frame[]>([{ scope, id, name }])
+  const current = stack[stack.length - 1]
+
   const [days, setDays] = useState<UsageHistoryDays | null>(null)
+  const [children, setChildren] = useState<UsageHistoryChildEntry[] | null>(null)
   const [loading, setLoading] = useState(false)
-  const [mode, setModeState] = useState<ViewMode>(readMode)
+  const [modeRaw, setModeState] = useState<ViewMode>(readMode)
   const [tip, setTip] = useState<Tip | null>(null)
-  // request token: only the latest in-flight fetch may apply (id switches / rapid refreshes)
+  const [calOpen, setCalOpen] = useState(false)
+  // 'list' needs children and an api key has none — fall back to 'heat' for proxy frames WITHOUT
+  // overwriting the persisted preference (leaving a proxy frame restores the list)
+  const mode: ViewMode = modeRaw === 'list' && current.scope === 'proxy' ? 'heat' : modeRaw
+  // request token: only the latest in-flight fetch may apply (frame switches / rapid refreshes)
   const reqRef = useRef(0)
   const proxiesRef = useRef(proxies)
   proxiesRef.current = proxies
@@ -95,32 +142,53 @@ export function UsageHistoryDialog({
   const setMode = (m: ViewMode): void => {
     localStorage.setItem(MODE_KEY, m)
     setTip(null)
+    setCalOpen(false)
     setModeState(m)
   }
 
-  const load = async (): Promise<void> => {
-    if (!id) return
+  const load = async (frame: Frame): Promise<void> => {
+    if (frame.scope !== 'app' && !frame.id) return
     const myReq = ++reqRef.current
     setLoading(true)
     try {
-      const r = await api.query('usage.history', { scope, id })
+      const r = await api.query(
+        'usage.history',
+        frame.scope === 'app' ? { scope: 'app' } : { scope: frame.scope, id: frame.id! }
+      )
       if (myReq !== reqRef.current) return
       setDays(r.days)
+      setChildren(r.children ?? null)
     } catch {
-      if (myReq === reqRef.current) setDays({})
+      if (myReq === reqRef.current) {
+        setDays({})
+        setChildren(null)
+      }
     } finally {
       if (myReq === reqRef.current) setLoading(false)
     }
   }
 
+  /** Enter a frame (open-seed / drill-down / back): fresh, latest-anchored view, then load it. */
+  const enterFrame = (frames: Frame[]): void => {
+    setStack(frames)
+    setDays(null)
+    setChildren(null)
+    setTip(null)
+    setAnchorKey(null)
+    setCalOpen(false)
+    void load(frames[frames.length - 1])
+  }
+  const pushFrame = (f: Frame): void => enterFrame([...stack, f])
+  const popFrame = (): void => {
+    if (stack.length > 1) enterFrame(stack.slice(0, -1))
+  }
+
   useEffect(() => {
     if (open) {
-      setDays(null)
-      setTip(null)
-      // re-read the persisted view mode: another instance (credential vs proxy dialogs are separate
-      // component instances) may have switched it since this one mounted
+      // re-read the persisted view mode: another instance (the app / credential / proxy dialogs are
+      // separate component instances) may have switched it since this one mounted
       setModeState(readMode())
-      void load()
+      enterFrame([{ scope, id, name }])
     }
     return () => {
       reqRef.current++
@@ -128,26 +196,30 @@ export function UsageHistoryDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, id, scope])
 
-  // live refresh: when a request is billed to this endpoint (or any endpoint of this credential),
-  // re-pull the ledger after a short quiet period so an open dialog tracks usage as it happens
+  // live refresh: when a request is billed to the CURRENT frame's scope (app = everything, else the
+  // endpoint / any endpoint of the credential), re-pull the ledger after a short quiet period so an
+  // open dialog tracks usage as it happens
   useEffect(() => {
-    if (!open || !id) return
+    if (!open) return
+    if (current.scope !== 'app' && !current.id) return
     let timer: ReturnType<typeof setTimeout> | null = null
     const off = api.on('proxy.usage', ({ proxyId }) => {
       const relevant =
-        scope === 'proxy'
-          ? proxyId === id
-          : proxiesRef.current.some((p) => p.id === proxyId && p.credentialId === id)
+        current.scope === 'app'
+          ? true // every billed request rolls up into the app ledger
+          : current.scope === 'proxy'
+            ? proxyId === current.id
+            : proxiesRef.current.some((p) => p.id === proxyId && p.credentialId === current.id)
       if (!relevant) return
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => void load(), 400)
+      timer = setTimeout(() => void load(current), 400)
     })
     return () => {
       off()
       if (timer) clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, id, scope])
+  }, [open, current.scope, current.id])
 
   // ── range + per-model stats for the CURRENT view (heat: 27 weeks; bars: 30 days) ──
   // day anchor: a per-minute tick while open — setState with the same key string is a React no-op,
@@ -159,11 +231,25 @@ export function UsageHistoryDialog({
     const timer = setInterval(() => setTodayKey(dayKeyOf(new Date())), 60_000)
     return () => clearInterval(timer)
   }, [open])
-  // 'YYYY-MM-DDT00:00:00' (no zone suffix) parses as LOCAL midnight
-  const today = useMemo(() => new Date(`${todayKey}T00:00:00`), [todayKey])
 
-  const gridStart = useMemo(() => addDays(mondayOf(today), -(HEAT_WEEKS - 1) * 7), [today])
-  const rangeStart = mode === 'heat' ? gridStart : addDays(today, -(BAR_DAYS - 1))
+  // ── pannable time window: the anchor is the day both charts END on. null = follow today, so the
+  // midnight rollover above keeps working; any pan/jump landing exactly on today resets to null. ──
+  const [anchorKey, setAnchorKey] = useState<string | null>(null)
+  const anchorDayKey = anchorKey ?? todayKey
+  const anchor = useMemo(() => parseKey(anchorDayKey), [anchorDayKey])
+
+  // earliest pannable day: the oldest ledger key of the CURRENT frame (no data → panning disabled)
+  const earliestDay = useMemo(() => {
+    let min: string | null = null
+    for (const k of Object.keys(days ?? {})) if (min === null || k < min) min = k
+    return min
+  }, [days])
+  /** 'YYYY-MM-DD' sorts lexically, so clamping into [earliestDay, todayKey] is string comparison. */
+  const clampDayKey = (key: string): string =>
+    earliestDay && key < earliestDay ? earliestDay : key > todayKey ? todayKey : key
+
+  const gridStart = useMemo(() => addDays(mondayOf(anchor), -(HEAT_WEEKS - 1) * 7), [anchor])
+  const rangeStart = mode === 'heat' ? gridStart : addDays(anchor, -(BAR_DAYS - 1))
 
   const stats = useMemo(() => {
     const per = new Map<string, { tokens: number; requests: number }>()
@@ -171,10 +257,10 @@ export function UsageHistoryDialog({
     let grandReqs = 0
     let maxDayTotal = 0
     // step with addDays (fresh construction from date fields), NOT setDate mutation: in zones whose
-    // DST gap starts at local midnight the mutated time sticks at 01:00 and the `<= today` (00:00)
-    // comparison would silently drop today from the totals
+    // DST gap starts at local midnight the mutated time sticks at 01:00 and the `<= anchor` (00:00)
+    // comparison would silently drop the anchor day from the totals
     let cur = new Date(rangeStart)
-    while (cur.getTime() <= today.getTime()) {
+    while (cur.getTime() <= anchor.getTime()) {
       const rec = days?.[dayKeyOf(cur)]
       if (rec) {
         let dayTotal = 0
@@ -197,7 +283,7 @@ export function UsageHistoryDialog({
       .sort((a, b) => b.tokens - a.tokens)
     const slot = new Map(ranked.map((r, i) => [r.model, i]))
     return { ranked, slot, grandTokens, grandReqs, maxDayTotal }
-  }, [days, rangeStart, today])
+  }, [days, rangeStart, anchor])
 
   const colorOf = (model: string): string => {
     const s = stats.slot.get(model)
@@ -233,9 +319,103 @@ export function UsageHistoryDialog({
     }
   }
 
+  // ── elastic drag-to-pan: each full PITCH of pointer travel shifts the anchor one step (heat: a
+  // week / a column; bars: a day / a bar), so the columns follow the hand 1:1. The sub-step
+  // remainder is a translateX written straight to the <svg> (no React re-render per frame); at a
+  // range bound the excess feeds resist() and springs back on release — the Q弹 settle. ──
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const panXRef = useRef(0)
+  const panRaf = useRef<number | undefined>(undefined)
+  const panActiveRef = useRef(false) // suppresses hover tooltips while actually panning
+  const dragRef = useRef<{ startX: number; active: boolean; startAnchor: string } | null>(null)
+  const canPan = earliestDay !== null
+  const daysPerStep = mode === 'heat' ? 7 : 1
+
+  const setPanX = (x: number): void => {
+    panXRef.current = x
+    if (svgRef.current) svgRef.current.style.transform = x === 0 ? '' : `translateX(${x}px)`
+  }
+  useEffect(
+    () => () => {
+      if (panRaf.current !== undefined) cancelAnimationFrame(panRaf.current)
+    },
+    []
+  )
+  /** Spring the residual translateX back to 0 — underdamped, so it overshoots a touch and bounces. */
+  const springBack = (): void => {
+    if (panRaf.current !== undefined) cancelAnimationFrame(panRaf.current)
+    let vel = 0
+    const step = (): void => {
+      vel = (vel + (0 - panXRef.current) * 0.18) * 0.62
+      const next = panXRef.current + vel
+      if (Math.abs(next) < 0.5 && Math.abs(vel) < 0.5) {
+        setPanX(0)
+        panRaf.current = undefined
+        return
+      }
+      setPanX(next)
+      panRaf.current = requestAnimationFrame(step)
+    }
+    panRaf.current = requestAnimationFrame(step)
+  }
+
+  const onPanDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!canPan || e.button !== 0) return
+    if (panRaf.current !== undefined) {
+      cancelAnimationFrame(panRaf.current)
+      panRaf.current = undefined
+    }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragRef.current = { startX: e.clientX, active: false, startAnchor: anchorDayKey }
+  }
+  const onPanMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const d = dragRef.current
+    if (!d) return
+    let dx = e.clientX - d.startX
+    if (!d.active) {
+      if (Math.abs(dx) < SLOP) return // a press within the slop stays a plain click / hover
+      d.active = true
+      panActiveRef.current = true
+      setTip(null)
+      d.startX += Math.sign(dx) * SLOP // re-base so activation doesn't jump the content 5px
+      dx = e.clientX - d.startX
+    }
+    // dragging RIGHT (positive dx) moves the window BACK in time — the content follows the hand.
+    // The pin point is the exact px of real travel available toward the bound in this direction;
+    // everything past it rubber-bands (resist starts at 0 there, so the hand-off is seamless)
+    const boundKey = dx >= 0 ? earliestDay! : todayKey // canPan ⇒ earliestDay non-null
+    const maxPx = (-dayDiff(d.startAnchor, boundKey) / daysPerStep) * PITCH // ≥0 right, ≤0 left
+    if (dx >= 0 ? dx > maxPx : dx < maxPx) {
+      setAnchorKey(boundKey >= todayKey ? null : boundKey)
+      const over = dx - maxPx
+      setPanX(Math.sign(over) * resist(Math.abs(over)))
+    } else {
+      const steps = Math.trunc(dx / PITCH)
+      const next = clampDayKey(keyAddDays(d.startAnchor, -steps * daysPerStep))
+      setAnchorKey(next >= todayKey ? null : next)
+      setPanX(dx - steps * PITCH) // sub-step remainder: smooth glide between quantised steps
+    }
+  }
+  const onPanUp = (): void => {
+    if (!dragRef.current) return
+    dragRef.current = null
+    panActiveRef.current = false
+    springBack()
+  }
+  const pan: PanProps = {
+    className: canPan ? 'cursor-grab touch-none select-none active:cursor-grabbing' : '',
+    title: canPan ? t('uh.dragHint') : undefined,
+    svgRef,
+    onPointerDown: onPanDown,
+    onPointerMove: onPanMove,
+    onPointerUp: onPanUp,
+    onPointerCancel: onPanUp
+  }
+
   /** Anchor the tooltip above (x, topY) in chart coords, clamped to the chart width; flip below
    *  the anchor when there is no room above. */
   const showTip = (info: DayInfo, anchorX: number, topY: number, svgW: number): void => {
+    if (panActiveRef.current) return // no hover cards mid-pan
     const rows = Math.max(1, info.entries.length)
     const estH = 40 + rows * 17 + (info.entries.length ? 23 : 0)
     let top = topY - estH - 6
@@ -251,29 +431,150 @@ export function UsageHistoryDialog({
   const dateLabel = (d: Date): string =>
     d.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric', weekday: 'short' })
 
-  const rangeLabel = mode === 'heat' ? t('uh.rangeHeat') : t('uh.rangeBars')
+  // range annotation: the friendly relative label while following today; the explicit window
+  // (start – anchor, year only when it isn't the current one) once panned back
+  const shortDate = (d: Date): string =>
+    d.toLocaleDateString(locale, {
+      month: 'short',
+      day: 'numeric',
+      ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' as const } : {})
+    })
+  const rangeLabel =
+    anchorKey === null
+      ? mode === 'heat'
+        ? t('uh.rangeHeat')
+        : t('uh.rangeBars')
+      : `${shortDate(rangeStart)} – ${shortDate(anchor)}`
+
+  // ── breakdown-list actions (app frame → credential entries; credential frame → api keys) ──
+  const drillDown = (e: UsageHistoryChildEntry): void => {
+    if (e.legacy) return // the surplus bucket has no ledger of its own
+    pushFrame({ scope: current.scope === 'app' ? 'credential' : 'proxy', id: e.id, name: e.name })
+  }
+  const renameEntry = async (e: UsageHistoryChildEntry): Promise<void> => {
+    const next = await askPrompt(t('uh.entryRenamePrompt'), e.name)
+    if (next === null) return
+    try {
+      await api.command(
+        'usage.history.renameEntry',
+        current.scope === 'app'
+          ? { credentialId: e.id, name: next }
+          : { credentialId: current.id!, proxyId: e.id, name: next }
+      )
+      void load(current)
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : String(err))
+    }
+  }
+  const deleteEntry = async (e: UsageHistoryChildEntry): Promise<void> => {
+    const label = e.legacy ? t('uh.legacyEntry') : e.name
+    if (!(await askConfirm(t('uh.entryDeleteConfirm', { n: label })))) return
+    try {
+      await api.command(
+        'usage.history.deleteEntry',
+        e.legacy
+          ? { kind: 'legacy', credentialId: current.scope === 'app' ? undefined : current.id! }
+          : current.scope === 'app'
+            ? { kind: 'credential', credentialId: e.id }
+            : { kind: 'proxy', credentialId: current.id!, proxyId: e.id }
+      )
+      toast('success', t('uh.entryDeleted'))
+      void load(current)
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const currentName = current.scope === 'app' ? t('uh.appTitle') : current.name
+  const modes: ViewMode[] = current.scope === 'proxy' ? ['heat', 'bars'] : ['heat', 'bars', 'list']
 
   return (
-    <DialogShell open={open} onClose={onClose} title={t('uh.title')} width="w-[32rem]">
-      {/* header: whose ledger + view-mode toggle */}
+    <DialogShell
+      open={open}
+      onClose={onClose}
+      title={current.scope === 'app' ? t('uh.appTitle') : t('uh.title')}
+      width="w-[32rem]"
+    >
+      {/* header: whose ledger (+ back when drilled down) + time controls + view-mode toggle */}
       <div className="flex items-center justify-between gap-3">
-        <span className="min-w-0 truncate text-sm font-bold opacity-70" title={name}>
-          {name}
-        </span>
-        <div className="doodle-edge flex shrink-0 gap-1 rounded-[10px] border-2 border-ink/40 p-1 text-sm">
-          {(['heat', 'bars'] as const).map((m) => (
+        <div className="flex min-w-0 items-center gap-1.5">
+          {stack.length > 1 && (
             <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`rounded-[7px] px-3 py-0.5 transition ${
-                mode === m ? 'bg-marker-knot text-[#2B2B2B]' : 'hover:bg-ink/5'
-              }`}
+              onClick={popFrame}
+              className="shrink-0 rounded-[6px] border-2 border-ink/30 px-1.5 py-0.5 text-xs transition hover:bg-ink/5"
             >
-              {m === 'heat' ? t('uh.modeHeat') : t('uh.modeBars')}
+              {t('uh.back')}
             </button>
-          ))}
+          )}
+          <span className="min-w-0 truncate text-sm font-bold opacity-70" title={currentName}>
+            {currentName}
+          </span>
+        </div>
+        <div className="relative flex shrink-0 items-center gap-1.5">
+          {mode !== 'list' && anchorKey !== null && (
+            <button
+              onClick={() => {
+                setAnchorKey(null)
+                setTip(null)
+              }}
+              className="rounded-[6px] border-2 border-ink/30 px-1.5 py-0.5 text-xs transition hover:bg-ink/5"
+            >
+              {t('uh.backToNow')}
+            </button>
+          )}
+          {mode !== 'list' && (
+            <button
+              title={t('uh.jumpDate')}
+              disabled={!canPan}
+              onClick={() => setCalOpen((v) => !v)}
+              className="rounded-[7px] border-2 border-ink/30 px-1.5 py-0.5 text-sm transition enabled:hover:bg-ink/5 disabled:opacity-40"
+            >
+              📅
+            </button>
+          )}
+          <div className="doodle-edge flex shrink-0 gap-1 rounded-[10px] border-2 border-ink/40 p-1 text-sm">
+            {modes.map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`rounded-[7px] px-2.5 py-0.5 transition ${
+                  mode === m ? 'bg-marker-knot text-[#2B2B2B]' : 'hover:bg-ink/5'
+                }`}
+              >
+                {m === 'heat' ? t('uh.modeHeat') : m === 'bars' ? t('uh.modeBars') : t('uh.modeList')}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* date-jump calendar: expands IN FLOW below the header (a floating popover would be clipped
+          by DialogShell's overflow-y-auto body — the dialog card is content-sized) */}
+      <AnimatePresence initial={false}>
+        {calOpen && mode !== 'list' && (
+          <motion.div
+            key="cal"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ height: { type: 'spring', stiffness: 320, damping: 26 }, opacity: { duration: 0.15 } }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="doodle-edge mx-auto mt-1 w-64 rounded-[10px] border-2 border-ink/70 bg-card shadow-doodle">
+              <DoodleCalendar
+                value={anchorDayKey}
+                minDay={earliestDay ?? undefined}
+                maxDay={todayKey}
+                onPick={(day) => {
+                  setAnchorKey(day >= todayKey ? null : day)
+                  setTip(null)
+                  setCalOpen(false)
+                }}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {days === null ? (
         <div className="py-10 text-center text-sm opacity-50">{t('common.loading')}</div>
@@ -285,77 +586,175 @@ export function UsageHistoryDialog({
           transition={{ type: 'spring', stiffness: 320, damping: 20 }}
           className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}
         >
-          {mode === 'heat' ? (
-            <HeatGrid
-              theme={theme}
-              locale={locale}
+          {mode === 'list' ? (
+            <BreakdownList
+              entries={children ?? []}
               t={t}
-              today={today}
-              gridStart={gridStart}
-              maxDayTotal={stats.maxDayTotal}
-              dayInfo={dayInfo}
-              tipKey={tip?.key}
-              showTip={showTip}
-              hideTip={() => setTip(null)}
-              tip={tip}
-              dateLabel={dateLabel}
+              onOpen={drillDown}
+              onRename={(e) => void renameEntry(e)}
+              onDelete={(e) => void deleteEntry(e)}
             />
           ) : (
-            <BarsChart
-              t={t}
-              locale={locale}
-              today={today}
-              maxDayTotal={stats.maxDayTotal}
-              slot={stats.slot}
-              dayInfo={dayInfo}
-              tipKey={tip?.key}
-              showTip={showTip}
-              hideTip={() => setTip(null)}
-              tip={tip}
-              dateLabel={dateLabel}
-            />
-          )}
+            <>
+              {mode === 'heat' ? (
+                <HeatGrid
+                  theme={theme}
+                  locale={locale}
+                  t={t}
+                  anchor={anchor}
+                  gridStart={gridStart}
+                  maxDayTotal={stats.maxDayTotal}
+                  dayInfo={dayInfo}
+                  tipKey={tip?.key}
+                  showTip={showTip}
+                  hideTip={() => setTip(null)}
+                  tip={tip}
+                  dateLabel={dateLabel}
+                  pan={pan}
+                />
+              ) : (
+                <BarsChart
+                  t={t}
+                  locale={locale}
+                  anchor={anchor}
+                  maxDayTotal={stats.maxDayTotal}
+                  slot={stats.slot}
+                  dayInfo={dayInfo}
+                  tipKey={tip?.key}
+                  showTip={showTip}
+                  hideTip={() => setTip(null)}
+                  tip={tip}
+                  dateLabel={dateLabel}
+                  pan={pan}
+                />
+              )}
 
-          {/* totals for the visible range: the grand total + every model's share. This list doubles
-              as the chart legend (bar mode) and as the always-visible value channel the tooltips
-              enhance — values here are reachable without hovering anything. */}
-          <div className="mt-4 flex items-baseline justify-between gap-2">
-            <span className="text-sm font-bold">
-              {t('uh.total')} <span className="opacity-50">· {rangeLabel}</span>
-            </span>
-            <span className="mono text-base font-bold" title={`${grouped(stats.grandTokens)} tokens`}>
-              {compact(stats.grandTokens)} tokens
-              <span className="ml-2 text-xs font-normal opacity-50">{t('uh.reqs', { n: grouped(stats.grandReqs) })}</span>
-            </span>
-          </div>
-          {stats.ranked.length === 0 ? (
-            <div className="rounded-[10px] border-2 border-dashed border-ink/25 px-4 py-6 text-center text-sm opacity-50">
-              {t('uh.empty')}
-            </div>
-          ) : (
-            <div className="mt-1 flex flex-col gap-1">
-              {stats.ranked.map((r) => (
-                <div key={r.model} className="flex items-center gap-2 text-sm">
-                  {mode === 'bars' && (
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
-                      style={{ background: colorOf(r.model) }}
-                    />
-                  )}
-                  <span className="mono min-w-0 flex-1 truncate opacity-75" title={labelOf(r.model)}>
-                    {labelOf(r.model)}
-                  </span>
-                  <span className="shrink-0 text-xs opacity-45">{t('uh.reqs', { n: grouped(r.requests) })}</span>
-                  <span className="mono w-20 shrink-0 text-right font-bold" title={`${grouped(r.tokens)} tokens`}>
-                    {compact(r.tokens)}
-                  </span>
+              {/* totals for the visible range: the grand total + every model's share. This list
+                  doubles as the chart legend (bar mode) and as the always-visible value channel the
+                  tooltips enhance — values here are reachable without hovering anything. */}
+              <div className="mt-4 flex items-baseline justify-between gap-2">
+                <span className="text-sm font-bold">
+                  {t('uh.total')} <span className="opacity-50">· {rangeLabel}</span>
+                </span>
+                <span className="mono text-base font-bold" title={`${grouped(stats.grandTokens)} tokens`}>
+                  {compact(stats.grandTokens)} tokens
+                  <span className="ml-2 text-xs font-normal opacity-50">{t('uh.reqs', { n: grouped(stats.grandReqs) })}</span>
+                </span>
+              </div>
+              {stats.ranked.length === 0 ? (
+                <div className="rounded-[10px] border-2 border-dashed border-ink/25 px-4 py-6 text-center text-sm opacity-50">
+                  {t('uh.empty')}
                 </div>
-              ))}
-            </div>
+              ) : (
+                <div className="mt-1 flex flex-col gap-1">
+                  {stats.ranked.map((r) => (
+                    <div key={r.model} className="flex items-center gap-2 text-sm">
+                      {mode === 'bars' && (
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
+                          style={{ background: colorOf(r.model) }}
+                        />
+                      )}
+                      <span className="mono min-w-0 flex-1 truncate opacity-75" title={labelOf(r.model)}>
+                        {labelOf(r.model)}
+                      </span>
+                      <span className="shrink-0 text-xs opacity-45">{t('uh.reqs', { n: grouped(r.requests) })}</span>
+                      <span className="mono w-20 shrink-0 text-right font-bold" title={`${grouped(r.tokens)} tokens`}>
+                        {compact(r.tokens)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </motion.div>
       )}
     </DialogShell>
+  )
+}
+
+/** 'list' view: one row per lower-level record (live + tombstoned + the legacy surplus bucket).
+ *  Row body drills down (legacy rows aren't drillable); rename only exists on tombstoned rows —
+ *  a live entry's name follows the entity itself. */
+function BreakdownList({
+  entries,
+  t,
+  onOpen,
+  onRename,
+  onDelete
+}: {
+  entries: UsageHistoryChildEntry[]
+  t: (k: string, v?: Record<string, string | number>) => string
+  onOpen: (e: UsageHistoryChildEntry) => void
+  onRename: (e: UsageHistoryChildEntry) => void
+  onDelete: (e: UsageHistoryChildEntry) => void
+}): JSX.Element {
+  if (entries.length === 0) {
+    return (
+      <div className="mt-3 rounded-[10px] border-2 border-dashed border-ink/25 px-4 py-6 text-center text-sm opacity-50">
+        {t('uh.listEmpty')}
+      </div>
+    )
+  }
+  return (
+    <div className="mt-3 flex flex-col gap-1.5">
+      <div className="text-xs opacity-50">{t('uh.listHint')}</div>
+      {entries.map((e) => {
+        const label = e.legacy ? t('uh.legacyEntry') : e.name
+        return (
+          <div
+            key={e.id}
+            onClick={e.legacy ? undefined : () => onOpen(e)}
+            className={`doodle-edge flex items-center gap-2 rounded-[8px] border-2 border-ink/25 px-3 py-2 transition ${
+              e.legacy ? '' : 'cursor-pointer hover:border-ink/60'
+            }`}
+          >
+            <span
+              className={`min-w-0 flex-1 truncate text-sm font-bold ${e.legacy ? 'italic opacity-60' : ''}`}
+              title={label}
+            >
+              {label}
+              {e.deleted && (
+                <span className="ml-1.5 inline-block rounded border border-ink/30 px-1 align-middle text-[10px] font-normal opacity-60">
+                  {t('uh.deletedTag')}
+                </span>
+              )}
+            </span>
+            <span className="shrink-0 text-right">
+              <span
+                className="mono text-sm font-bold"
+                title={`${grouped(e.totals.inputTokens + e.totals.outputTokens)} tokens`}
+              >
+                {compact(e.totals.inputTokens + e.totals.outputTokens)} tokens
+              </span>
+              <span className="ml-2 text-xs opacity-45">{t('uh.reqs', { n: grouped(e.totals.requests) })}</span>
+            </span>
+            {e.deleted && (
+              <button
+                title={t('uh.entryRenamePrompt')}
+                onClick={(ev) => {
+                  ev.stopPropagation()
+                  onRename(e)
+                }}
+                className="shrink-0 rounded-[6px] border-2 border-ink/30 px-1.5 py-0.5 text-xs transition hover:bg-ink/5"
+              >
+                ✏️
+              </button>
+            )}
+            <button
+              onClick={(ev) => {
+                ev.stopPropagation()
+                onDelete(e)
+              }}
+              className="shrink-0 rounded-[6px] border-2 border-marker-coral/60 px-1.5 py-0.5 text-xs text-marker-coral transition hover:bg-marker-coral/10"
+            >
+              🗑
+            </button>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -401,12 +800,13 @@ function TipCard({
   )
 }
 
-/** GitHub-style contribution calendar: 27 Monday-first weeks, one green-ramp cell per local day. */
+/** GitHub-style contribution calendar: 27 Monday-first weeks of green-ramp cells, ENDING on the
+ *  anchor day (today unless panned back) — cells beyond the anchor are simply skipped. */
 function HeatGrid({
   theme,
   locale,
   t,
-  today,
+  anchor,
   gridStart,
   maxDayTotal,
   dayInfo,
@@ -414,12 +814,13 @@ function HeatGrid({
   showTip,
   hideTip,
   tip,
-  dateLabel
+  dateLabel,
+  pan
 }: {
   theme: 'paper' | 'dark'
   locale: string
   t: (k: string, v?: Record<string, string | number>) => string
-  today: Date
+  anchor: Date
   gridStart: Date
   maxDayTotal: number
   dayInfo: (d: Date) => DayInfo
@@ -428,6 +829,7 @@ function HeatGrid({
   hideTip: () => void
   tip: Tip | null
   dateLabel: (d: Date) => string
+  pan: PanProps
 }): JSX.Element {
   const LEFT = 30
   const TOP = 16
@@ -460,7 +862,7 @@ function HeatGrid({
   for (let w = 0; w < HEAT_WEEKS; w++) {
     for (let r = 0; r < 7; r++) {
       const date = addDays(gridStart, w * 7 + r)
-      if (date.getTime() > today.getTime()) continue
+      if (date.getTime() > anchor.getTime()) continue
       const info = dayInfo(date)
       const x = LEFT + w * PITCH
       const y = TOP + r * PITCH
@@ -499,8 +901,16 @@ function HeatGrid({
   }
 
   return (
-    <div className="relative mx-auto mt-3" style={{ width: svgW }}>
-      <svg width={svgW} height={svgH} className="block font-doodle">
+    <div
+      className={`relative mx-auto mt-3 ${pan.className}`}
+      style={{ width: svgW }}
+      title={pan.title}
+      onPointerDown={pan.onPointerDown}
+      onPointerMove={pan.onPointerMove}
+      onPointerUp={pan.onPointerUp}
+      onPointerCancel={pan.onPointerCancel}
+    >
+      <svg ref={pan.svgRef} width={svgW} height={svgH} className="block font-doodle">
         {monthLabels.map((m) => (
           <text
             key={m.x}
@@ -540,12 +950,12 @@ function HeatGrid({
   )
 }
 
-/** Last-30-days stacked columns: one ≤24px bar per day, segments = models (2px surface gaps),
- *  rounded data-end on the top segment only, hairline gridlines with compact tick values. */
+/** 30-day stacked columns ENDING on the anchor day: one ≤24px bar per day, segments = models (2px
+ *  surface gaps), rounded data-end on the top segment only, hairline gridlines + compact ticks. */
 function BarsChart({
   t,
   locale,
-  today,
+  anchor,
   maxDayTotal,
   slot,
   dayInfo,
@@ -553,11 +963,12 @@ function BarsChart({
   showTip,
   hideTip,
   tip,
-  dateLabel
+  dateLabel,
+  pan
 }: {
   t: (k: string, v?: Record<string, string | number>) => string
   locale: string
-  today: Date
+  anchor: Date
   maxDayTotal: number
   slot: Map<string, number>
   dayInfo: (d: Date) => DayInfo
@@ -566,6 +977,7 @@ function BarsChart({
   hideTip: () => void
   tip: Tip | null
   dateLabel: (d: Date) => string
+  pan: PanProps
 }): JSX.Element {
   const LEFT = 40
   const RIGHT = 4
@@ -580,7 +992,7 @@ function BarsChart({
   const bars: JSX.Element[] = []
   const hits: JSX.Element[] = []
   for (let i = 0; i < BAR_DAYS; i++) {
-    const date = addDays(today, i - (BAR_DAYS - 1))
+    const date = addDays(anchor, i - (BAR_DAYS - 1))
     const info = dayInfo(date)
     const x = LEFT + i * PITCH
     if (info.total > 0) {
@@ -657,7 +1069,7 @@ function BarsChart({
   const xLabels: JSX.Element[] = []
   for (let i = 0; i < BAR_DAYS; i++) {
     if ((BAR_DAYS - 1 - i) % 5 !== 0) continue
-    const date = addDays(today, i - (BAR_DAYS - 1))
+    const date = addDays(anchor, i - (BAR_DAYS - 1))
     xLabels.push(
       <text
         key={i}
@@ -672,8 +1084,16 @@ function BarsChart({
   }
 
   return (
-    <div className="relative mx-auto mt-3" style={{ width: svgW }}>
-      <svg width={svgW} height={svgH} className="block font-doodle">
+    <div
+      className={`relative mx-auto mt-3 ${pan.className}`}
+      style={{ width: svgW }}
+      title={pan.title}
+      onPointerDown={pan.onPointerDown}
+      onPointerMove={pan.onPointerMove}
+      onPointerUp={pan.onPointerUp}
+      onPointerCancel={pan.onPointerCancel}
+    >
+      <svg ref={pan.svgRef} width={svgW} height={svgH} className="block font-doodle">
         {/* hairline gridlines + compact tick values (they carry the values bars don't label) */}
         {[0.5, 1].map((f) => (
           <g key={f}>

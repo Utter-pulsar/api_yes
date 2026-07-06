@@ -24,9 +24,11 @@ const DICT: Record<string, Entry> = {
   // ── title bar / menu / about ──
   'menu.aria': { zh: '菜单', en: 'Menu' },
   'menu.settings': { zh: '⚙️ 设置', en: '⚙️ Settings' },
-  'menu.themeDark': { zh: '🌙 夜间模式', en: '🌙 Dark mode' },
-  'menu.themeLight': { zh: '☀️ 白天模式', en: '☀️ Light mode' },
   'menu.about': { zh: '🏷️ 版本', en: '🏷️ Version' },
+  'menu.codexModels': { zh: '📋 Codex 模型', en: '📋 Codex models' },
+  'header.themeDark': { zh: '🌙 夜间', en: '🌙 Dark' },
+  'header.themeLight': { zh: '☀️ 白天', en: '☀️ Light' },
+  'header.themeToggle': { zh: '切换 白天 / 夜间', en: 'Toggle light / dark' },
   'about.version': { zh: '版本 {v}', en: 'Version {v}' },
   'about.author': { zh: '作者 {a}', en: 'Author {a}' },
   'about.upToDate': { zh: '已是最新版本 ✓', en: 'Up to date ✓' },
@@ -76,6 +78,27 @@ const DICT: Record<string, Entry> = {
   },
   'sidebar.apiCount': { zh: '{n} 个 API', en: '{n} API(s)' },
   'sidebar.disabled': { zh: '已停用', en: 'Disabled' },
+  'sidebar.collapse': { zh: '折叠侧栏', en: 'Collapse sidebar' },
+  'sidebar.expand': { zh: '展开侧栏', en: 'Expand sidebar' },
+  'sidebar.resize': { zh: '拖动调整宽度', en: 'Drag to resize' },
+  'sidebar.usageTitle': { zh: '点击查看应用总用量记录', en: 'Click for app-wide usage history' },
+
+  // ── Codex model checklist (hamburger menu → editable list) ──
+  'cm.title': { zh: 'Codex 模型列表', en: 'Codex models' },
+  'cm.hint': {
+    zh: 'ChatGPT 订阅（Codex）没有公开的模型列表接口，只能在这里手动维护。顺序有讲究：测试连接会从上到下逐个探测，请把便宜的模型放在最前面。',
+    en: 'The Codex (ChatGPT subscription) backend has no public model-list endpoint, so this list is maintained by hand. Order matters: connectivity tests probe top-to-bottom — keep the cheapest model first.'
+  },
+  'cm.add': { zh: '＋ 添加模型', en: '＋ Add model' },
+  'cm.addPrompt': { zh: '输入模型 ID', en: 'Model id' },
+  'cm.editPrompt': { zh: '修改模型 ID', en: 'Edit model id' },
+  'cm.deleteConfirm': { zh: '删除模型「{id}」？', en: 'Remove model "{id}"?' },
+  'cm.lastModel': { zh: '至少保留一个模型', en: 'Keep at least one model' },
+  'cm.duplicate': { zh: '模型已在列表中', en: 'Model already in the list' },
+  'cm.reset': { zh: '恢复默认', en: 'Restore defaults' },
+  'cm.resetConfirm': { zh: '恢复为默认模型列表？', en: 'Restore the default model list?' },
+  'cm.moveUp': { zh: '上移', en: 'Move up' },
+  'cm.moveDown': { zh: '下移', en: 'Move down' },
 
   // ── badges ──
   'badge.oauth': { zh: '订阅授权', en: 'Subscription' },
@@ -190,6 +213,34 @@ const DICT: Record<string, Entry> = {
   'uh.dow.mon': { zh: '一', en: 'Mon' },
   'uh.dow.wed': { zh: '三', en: 'Wed' },
   'uh.dow.fri': { zh: '五', en: 'Fri' },
+  'uh.appTitle': { zh: '应用总用量', en: 'All-app usage' },
+  'uh.modeList': { zh: '明细列表', en: 'Breakdown' },
+  'uh.back': { zh: '← 返回', en: '← Back' },
+  'uh.deletedTag': { zh: '已删除', en: 'deleted' },
+  'uh.legacyEntry': { zh: '历史用量（未细分）', en: 'Historical (unattributed)' },
+  'uh.listEmpty': { zh: '还没有下级用量记录', en: 'No breakdown records yet' },
+  'uh.listHint': { zh: '点击一条记录查看它自己的用量详情', en: 'Click a record to open its own usage detail' },
+  'uh.entryDeleteConfirm': {
+    zh: '删除「{n}」的用量记录？各级总量会随之减少，且无法恢复',
+    en: 'Delete the usage record of "{n}"? Totals at every level shrink accordingly; this cannot be undone'
+  },
+  'uh.entryDeleted': { zh: '已删除记录', en: 'Record deleted' },
+  'uh.entryRenamePrompt': { zh: '重命名这条记录', en: 'Rename this record' },
+  'uh.jumpDate': { zh: '跳转日期', en: 'Jump to date' },
+  'uh.backToNow': { zh: '回到最新', en: 'Back to latest' },
+  'uh.dragHint': { zh: '按住图表左右拖动可翻阅时间', en: 'Drag the chart sideways to pan through time' },
+
+  // ── hand-drawn calendar (date jump) ──
+  'cal.today': { zh: '今天', en: 'Today' },
+  'cal.prevMonth': { zh: '上个月', en: 'Previous month' },
+  'cal.nextMonth': { zh: '下个月', en: 'Next month' },
+  'cal.dow.sun': { zh: '日', en: 'Su' },
+  'cal.dow.mon': { zh: '一', en: 'Mo' },
+  'cal.dow.tue': { zh: '二', en: 'Tu' },
+  'cal.dow.wed': { zh: '三', en: 'We' },
+  'cal.dow.thu': { zh: '四', en: 'Th' },
+  'cal.dow.fri': { zh: '五', en: 'Fr' },
+  'cal.dow.sat': { zh: '六', en: 'Sa' },
 
   // ── API (proxy) list ──
   'api.title': { zh: 'API 列表', en: 'APIs' },

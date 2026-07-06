@@ -7,10 +7,11 @@ import type {
   CredentialView,
   OAuthAccount,
   ProxyEndpoint,
-  UsageHistoryStore
+  UsageHistoryStore,
+  UsageHistoryTree
 } from '@shared/types'
-import { DEFAULT_SETTINGS, emptyUsageHistory } from '@shared/types'
-import { reconcileHistoryWithCounters } from './usage-history'
+import { DEFAULT_SETTINGS, emptyUsageHistoryTree } from '@shared/types'
+import { migrateLegacyHistory, reconcileHistoryWithCounters } from './usage-history'
 import type { TestResult } from '@shared/types/common'
 import type { Provider, CredentialKind, Id } from '@shared/types/common'
 
@@ -53,8 +54,9 @@ export interface Database {
   settings: AppSettings
   credentials: StoredCredential[]
   proxies: ProxyEndpoint[]
-  /** permanent per-day, per-model token ledgers (kept across model-list changes and usage resets) */
-  usageHistory: UsageHistoryStore
+  /** permanent per-day, per-model token ledger tree (survives model-list changes, usage resets
+   *  and entity deletion — deleted entities live on as tombstoned nodes) */
+  usageHistory: UsageHistoryTree
 }
 
 const SCHEMA_VERSION = 1
@@ -71,7 +73,8 @@ interface PersistedDB {
   settings: AppSettings
   credentials: PersistedCredential[]
   proxies: ProxyEndpoint[]
-  usageHistory?: UsageHistoryStore
+  /** tree since v0.0.8; the flat pre-tree shape is still readable and migrated on first load */
+  usageHistory?: UsageHistoryTree | UsageHistoryStore
 }
 
 function emptyDb(): Database {
@@ -80,7 +83,7 @@ function emptyDb(): Database {
     settings: { ...DEFAULT_SETTINGS },
     credentials: [],
     proxies: [],
-    usageHistory: emptyUsageHistory()
+    usageHistory: emptyUsageHistoryTree()
   }
 }
 
@@ -165,15 +168,24 @@ export class Store {
       enabled: p.enabled !== false,
       localOnly: p.localOnly !== false
     }))
+    // history: detect the shape structurally — only the flat pre-tree store had a top-level
+    // per-proxy ledger map; the tree is recognized by construction (migration is pure, so
+    // re-running it on an unpersisted old file yields the identical tree next boot)
+    const h = raw.usageHistory
+    let usageHistory: UsageHistoryTree
+    if (!h) {
+      usageHistory = emptyUsageHistoryTree()
+    } else if ('proxies' in h) {
+      usageHistory = migrateLegacyHistory({ credentials, proxies, usageHistory: h })
+    } else {
+      usageHistory = { legacyDays: h.legacyDays ?? {}, credentials: h.credentials ?? {} }
+    }
     return {
       version: raw.version ?? SCHEMA_VERSION,
       settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
       credentials,
       proxies,
-      usageHistory: {
-        credentials: raw.usageHistory?.credentials ?? {},
-        proxies: raw.usageHistory?.proxies ?? {}
-      }
+      usageHistory
     }
   }
 

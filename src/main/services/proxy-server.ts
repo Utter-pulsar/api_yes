@@ -2,14 +2,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { networkInterfaces } from 'node:os'
 import type { ProxyEndpoint, ProxyServerStatus, Provider } from '@shared/types'
 import type { AppCore } from './context'
-import { ensureAccessToken, mergeHeaderValue, resolveForward } from './provider/upstream'
+import { codexModels, ensureAccessToken, mergeHeaderValue, resolveForward } from './provider/upstream'
 import { createUsageMeter, type ParsedUsage } from './provider/usage'
 import type { StoredCredential } from './store'
 import { recordDailyUsage, usageBucket } from './usage-history'
 import { mt } from './i18n'
 import {
   CODEX_BASE,
-  CODEX_CHATGPT_MODELS,
   chatToResponses,
   codexHeaders,
   collectCodexAsChat,
@@ -374,7 +373,7 @@ export class ProxyServer {
 
   /** Serve the curated Codex model set as an OpenAI /models list (Codex has no list endpoint). */
   private serveCodexModels(res: ServerResponse): void {
-    const data = CODEX_CHATGPT_MODELS.map((id) => ({ id, object: 'model', owned_by: 'openai' }))
+    const data = codexModels(this.core).map((id) => ({ id, object: 'model', owned_by: 'openai' }))
     res.writeHead(200, { 'content-type': 'application/json', ...CORS })
     res.end(JSON.stringify({ object: 'list', data }))
   }
@@ -394,7 +393,8 @@ export class ProxyServer {
       return this.fail(res, 400, mt('proxy.badJson'), 'openai')
     }
     const wantStream = chat.stream === true
-    const model = typeof chat.model === 'string' ? chat.model : 'gpt-5.5'
+    // no model in the request → first entry of the curated list (cheapest-first, never empty)
+    const model = typeof chat.model === 'string' ? chat.model : codexModels(this.core)[0]
 
     let token: string
     try {

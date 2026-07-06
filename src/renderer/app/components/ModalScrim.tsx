@@ -1,9 +1,10 @@
-const TITLEBAR_H = 44 // height of the draggable title-bar strip
+const TITLEBAR_H = 44 // height of the draggable title-bar strip (row 1 of the two-row header)
 
 /**
- * The dim layer behind a modal, split at the title bar:
- *  - BELOW the bar: dims AND catches outside-clicks to dismiss the modal.
- *  - OVER the bar: dims visually but is click-through, so the window controls (and hamburger)
+ * The dim layer behind a modal, split at the drag strip:
+ *  - BELOW the strip: dims AND catches outside-clicks to dismiss the modal. This includes the app
+ *    header (row 2: lockup + theme toggle) — it dims like the rest of the page, intentionally.
+ *  - OVER the strip: dims visually but is click-through, so the window controls (and hamburger)
  *    stay usable while a dialog is open.
  *
  * The modal's outer container must be `pointer-events-none` and its card `pointer-events-auto`.

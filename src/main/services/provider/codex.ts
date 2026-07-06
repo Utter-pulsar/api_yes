@@ -15,14 +15,6 @@ import { randomUUID } from 'node:crypto'
 export const CODEX_BASE = 'https://chatgpt.com/backend-api/codex'
 const CODEX_VERSION = '0.50.0' // UA version; format matters to Cloudflare more than the exact number
 
-/**
- * Models that work with a ChatGPT subscription via the Codex backend. There's no public list
- * endpoint (the CLI ships a built-in set + `/model`), so this is curated — update as OpenAI ships
- * models (as of 2026-06: gpt-5 / gpt-5.2-codex are rejected for ChatGPT accounts). Ordered
- * cheapest-first for the connectivity probe.
- */
-export const CODEX_CHATGPT_MODELS = ['gpt-5.4-mini', 'gpt-5.5', 'gpt-5.4', 'gpt-5.3-codex']
-
 function codexUserAgent(): string {
   const os =
     process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux'

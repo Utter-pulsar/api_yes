@@ -13,7 +13,9 @@ export function Toasts(): JSX.Element {
   const toasts = useStore((s) => s.toasts)
   const dismiss = useStore((s) => s.dismissToast)
   return (
-    <div className="pointer-events-none fixed right-4 top-12 z-[95] flex w-72 flex-col gap-2">
+    // top: below the full two-row header — 44px drag strip + ~58px app header (py-3 + h-8 logo
+    // + border-b-2) ≈ 102px, plus a small gap
+    <div className="pointer-events-none fixed right-4 top-[108px] z-[95] flex w-72 flex-col gap-2">
       <AnimatePresence initial={false}>
         {toasts.map((t) => (
           <motion.div
