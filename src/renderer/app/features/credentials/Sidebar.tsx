@@ -278,12 +278,13 @@ export function Sidebar(): JSX.Element {
       </div>
 
       {/* width drag handle — a wide invisible hit zone straddling the right border, with a small
-          visible "white fry" capsule. z-[60] keeps it above the doodle scrollthumb (z-40). */}
+          visible "white fry" capsule. z-[45] keeps it above the doodle scrollthumb (z-40) but
+          below shared modal shells (z-50), so dialogs can cover it cleanly. */}
       {!collapsed && (
         <div
           onPointerDown={startResize}
           title={t('sidebar.resize')}
-          className="group absolute -right-[7px] top-0 z-[60] flex h-full w-3 touch-none cursor-col-resize items-center justify-center"
+          className="group absolute -right-[7px] top-0 z-[45] flex h-full w-3 touch-none cursor-col-resize items-center justify-center"
         >
           <div className="doodle-edge h-10 w-1.5 rounded-full border-2 border-ink/60 bg-paper transition group-hover:border-ink" />
         </div>
