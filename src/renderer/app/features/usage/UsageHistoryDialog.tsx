@@ -8,6 +8,7 @@ import { useT } from '../../lib/i18n'
 import { compact, grouped } from '../../lib/format'
 import { DialogShell } from '../../components/DialogShell'
 import { DoodleCalendar } from '../../components/doodle/DoodleCalendar'
+import { DoodleCalendarIcon } from '../../components/doodle/DoodleCalendarIcon'
 
 /**
  * Chart palettes validated with the dataviz six checks (CVD ΔE, lightness band, chroma, contrast)
@@ -28,9 +29,12 @@ const HEAT: Record<'paper' | 'dark', string[]> = {
 
 const CELL = 11 // heat cell / bar width
 const PITCH = 13 // CELL + 2px surface gap
-const HEAT_WEEKS = 27 // 26 full weeks + the current partial one ⇒ ≥183 days: “at least half a year”
-const BAR_DAYS = 30
+const HEAT_WEEKS = 27 // fixed layout width for the heatmap
+const HEAT_DAYS = 183 // inclusive half-year window selected from a start date
+const BAR_DAYS = 30 // inclusive one-month window selected from a start date
 const TT_W = 220 // tooltip width
+const BROWSE_MIN_DAY = '0001-01-01'
+const BROWSE_MAX_DAY = '9999-12-31'
 
 // ── drag-to-pan tuning (simplified elastic drag: slop → PITCH-quantised steps → rubber-band) ──
 const SLOP = 5 // px of pointer travel before a press becomes a pan (clicks/hovers stay cheap)
@@ -39,25 +43,38 @@ const MAX_OVER = 40 // px of rubber-band give past either end of the pannable ra
 const resist = (x: number): number => MAX_OVER * (1 - 1 / (x / MAX_OVER + 1))
 
 type ViewMode = 'heat' | 'bars' | 'list'
+type ChartMode = 'heat' | 'bars'
 const MODE_KEY = 'api-yes-usage-history-view'
 const readMode = (): ViewMode => {
   const v = localStorage.getItem(MODE_KEY)
   return v === 'bars' || v === 'list' ? v : 'heat'
 }
+const windowDaysOf = (mode: ChartMode): number => (mode === 'heat' ? HEAT_DAYS : BAR_DAYS)
+const stepDaysOf = (mode: ChartMode): number => (mode === 'heat' ? 7 : 1)
 
 // ── local-day helpers (the ledger is keyed by LOCAL 'YYYY-MM-DD', matching the main process) ──
+const localDate = (y: number, m: number, d: number): Date => {
+  const date = new Date(0)
+  date.setFullYear(y, m, d)
+  date.setHours(0, 0, 0, 0)
+  return date
+}
 const dayKeyOf = (d: Date): string => {
   const p = (n: number): string => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  return `${String(d.getFullYear()).padStart(4, '0')}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
-const addDays = (d: Date, n: number): Date => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+const addDays = (d: Date, n: number): Date => localDate(d.getFullYear(), d.getMonth(), d.getDate() + n)
 const mondayOf = (d: Date): Date => addDays(d, -((d.getDay() + 6) % 7))
-// 'YYYY-MM-DDT00:00:00' (no zone suffix) parses as LOCAL midnight
-const parseKey = (key: string): Date => new Date(`${key}T00:00:00`)
+const parseKey = (key: string): Date => {
+  const hit = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key)
+  return hit ? localDate(Number(hit[1]), Number(hit[2]) - 1, Number(hit[3])) : localDate(1970, 0, 1)
+}
 const keyAddDays = (key: string, n: number): string => dayKeyOf(addDays(parseKey(key), n))
 /** Whole days a → b; rounded so DST's 23/25-hour days can't skew the count. */
 const dayDiff = (a: string, b: string): number =>
   Math.round((parseKey(b).getTime() - parseKey(a).getTime()) / 86_400_000)
+/** 'YYYY-MM-DD' sorts lexically, so clamping into a browse range is plain string comparison. */
+const clampKey = (key: string, min: string, max: string): string => (key < min ? min : key > max ? max : key)
 
 type HistoryScope = 'app' | 'credential' | 'proxy'
 /** One level of the drill-down stack: whose ledger the dialog currently shows. */
@@ -134,9 +151,12 @@ export function UsageHistoryDialog({
   // 'list' needs children and an api key has none — fall back to 'heat' for proxy frames WITHOUT
   // overwriting the persisted preference (leaving a proxy frame restores the list)
   const mode: ViewMode = modeRaw === 'list' && current.scope === 'proxy' ? 'heat' : modeRaw
+  const chartMode: ChartMode = mode === 'bars' ? 'bars' : 'heat'
   // request token: only the latest in-flight fetch may apply (frame switches / rapid refreshes)
   const reqRef = useRef(0)
   const proxiesRef = useRef(proxies)
+  const calendarControlsRef = useRef<HTMLDivElement | null>(null)
+  const calendarPopupRef = useRef<HTMLDivElement | null>(null)
   proxiesRef.current = proxies
 
   const setMode = (m: ViewMode): void => {
@@ -174,7 +194,7 @@ export function UsageHistoryDialog({
     setDays(null)
     setChildren(null)
     setTip(null)
-    setAnchorKey(null)
+    setWindowStartKey(null)
     setCalOpen(false)
     void load(frames[frames.length - 1])
   }
@@ -221,9 +241,21 @@ export function UsageHistoryDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, current.scope, current.id])
 
-  // ── range + per-model stats for the CURRENT view (heat: 27 weeks; bars: 30 days) ──
-  // day anchor: a per-minute tick while open — setState with the same key string is a React no-op,
-  // so this re-renders exactly once, at local midnight, keeping a left-open dialog on today
+  useEffect(() => {
+    if (!open || !calOpen || mode === 'list') return
+    const onPointerDown = (ev: PointerEvent): void => {
+      const target = ev.target
+      if (!(target instanceof Node)) return
+      if (calendarControlsRef.current?.contains(target)) return
+      if (calendarPopupRef.current?.contains(target)) return
+      setCalOpen(false)
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => window.removeEventListener('pointerdown', onPointerDown)
+  }, [calOpen, mode, open])
+
+  // ── visible fixed-size window: null = follow the latest trailing window for the current chart mode.
+  // While open we tick once a minute so the trailing window rolls forward at local midnight. ──
   const [todayKey, setTodayKey] = useState(() => dayKeyOf(new Date()))
   useEffect(() => {
     if (!open) return
@@ -232,35 +264,40 @@ export function UsageHistoryDialog({
     return () => clearInterval(timer)
   }, [open])
 
-  // ── pannable time window: the anchor is the day both charts END on. null = follow today, so the
-  // midnight rollover above keeps working; any pan/jump landing exactly on today resets to null. ──
-  const [anchorKey, setAnchorKey] = useState<string | null>(null)
-  const anchorDayKey = anchorKey ?? todayKey
-  const anchor = useMemo(() => parseKey(anchorDayKey), [anchorDayKey])
+  const [windowStartKey, setWindowStartKey] = useState<string | null>(null)
+  const windowDays = windowDaysOf(chartMode)
+  const latestStartKey = useMemo(() => keyAddDays(todayKey, -(windowDays - 1)), [todayKey, windowDays])
+  const maxStartKey = useMemo(() => keyAddDays(BROWSE_MAX_DAY, -(windowDays - 1)), [windowDays])
+  const visibleStartKey = useMemo(
+    () => clampKey(windowStartKey ?? latestStartKey, BROWSE_MIN_DAY, maxStartKey),
+    [latestStartKey, maxStartKey, windowStartKey]
+  )
+  const windowStart = useMemo(() => parseKey(visibleStartKey), [visibleStartKey])
+  const windowEnd = useMemo(() => addDays(windowStart, windowDays - 1), [windowDays, windowStart])
+  const visibleEndKey = dayKeyOf(windowEnd)
+  const gridStart = useMemo(() => mondayOf(windowStart), [windowStart])
 
-  // earliest pannable day: the oldest ledger key of the CURRENT frame (no data → panning disabled)
-  const earliestDay = useMemo(() => {
-    let min: string | null = null
-    for (const k of Object.keys(days ?? {})) if (min === null || k < min) min = k
-    return min
-  }, [days])
-  /** 'YYYY-MM-DD' sorts lexically, so clamping into [earliestDay, todayKey] is string comparison. */
-  const clampDayKey = (key: string): string =>
-    earliestDay && key < earliestDay ? earliestDay : key > todayKey ? todayKey : key
+  // Mode switches can change the legal max start (30-day vs half-year window). Clamp stale custom
+  // starts back into range; if they land on the trailing-latest start, restore follow-latest mode.
+  useEffect(() => {
+    if (windowStartKey === null) return
+    const clamped = clampKey(windowStartKey, BROWSE_MIN_DAY, maxStartKey)
+    const normalized = clamped === latestStartKey ? null : clamped
+    if (normalized !== windowStartKey) setWindowStartKey(normalized)
+  }, [latestStartKey, maxStartKey, windowStartKey])
 
-  const gridStart = useMemo(() => addDays(mondayOf(anchor), -(HEAT_WEEKS - 1) * 7), [anchor])
-  const rangeStart = mode === 'heat' ? gridStart : addDays(anchor, -(BAR_DAYS - 1))
+  const writeWindowStart = (key: string): void => {
+    const clamped = clampKey(key, BROWSE_MIN_DAY, maxStartKey)
+    setWindowStartKey(clamped === latestStartKey ? null : clamped)
+  }
 
   const stats = useMemo(() => {
     const per = new Map<string, { tokens: number; requests: number }>()
     let grandTokens = 0
     let grandReqs = 0
     let maxDayTotal = 0
-    // step with addDays (fresh construction from date fields), NOT setDate mutation: in zones whose
-    // DST gap starts at local midnight the mutated time sticks at 01:00 and the `<= anchor` (00:00)
-    // comparison would silently drop the anchor day from the totals
-    let cur = new Date(rangeStart)
-    while (cur.getTime() <= anchor.getTime()) {
+    let cur = new Date(windowStart)
+    while (cur.getTime() <= windowEnd.getTime()) {
       const rec = days?.[dayKeyOf(cur)]
       if (rec) {
         let dayTotal = 0
@@ -283,7 +320,7 @@ export function UsageHistoryDialog({
       .sort((a, b) => b.tokens - a.tokens)
     const slot = new Map(ranked.map((r, i) => [r.model, i]))
     return { ranked, slot, grandTokens, grandReqs, maxDayTotal }
-  }, [days, rangeStart, anchor])
+  }, [days, windowEnd, windowStart])
 
   const colorOf = (model: string): string => {
     const s = stats.slot.get(model)
@@ -319,17 +356,17 @@ export function UsageHistoryDialog({
     }
   }
 
-  // ── elastic drag-to-pan: each full PITCH of pointer travel shifts the anchor one step (heat: a
-  // week / a column; bars: a day / a bar), so the columns follow the hand 1:1. The sub-step
-  // remainder is a translateX written straight to the <svg> (no React re-render per frame); at a
-  // range bound the excess feeds resist() and springs back on release — the Q弹 settle. ──
+  // ── elastic drag-to-pan: each full PITCH of pointer travel shifts the window start one step
+  // (heat: a week / a column; bars: a day / a bar), so the columns follow the hand 1:1. The
+  // sub-step remainder is a translateX written straight to the <svg> (no React re-render per frame);
+  // at a range bound the excess feeds resist() and springs back on release — the Q弹 settle. ──
   const svgRef = useRef<SVGSVGElement | null>(null)
   const panXRef = useRef(0)
   const panRaf = useRef<number | undefined>(undefined)
   const panActiveRef = useRef(false) // suppresses hover tooltips while actually panning
-  const dragRef = useRef<{ startX: number; active: boolean; startAnchor: string } | null>(null)
-  const canPan = earliestDay !== null
-  const daysPerStep = mode === 'heat' ? 7 : 1
+  const dragRef = useRef<{ startX: number; active: boolean; startWindow: string } | null>(null)
+  const canPan = true
+  const daysPerStep = stepDaysOf(chartMode)
 
   const setPanX = (x: number): void => {
     panXRef.current = x
@@ -366,7 +403,7 @@ export function UsageHistoryDialog({
       panRaf.current = undefined
     }
     e.currentTarget.setPointerCapture(e.pointerId)
-    dragRef.current = { startX: e.clientX, active: false, startAnchor: anchorDayKey }
+    dragRef.current = { startX: e.clientX, active: false, startWindow: visibleStartKey }
   }
   const onPanMove = (e: React.PointerEvent<HTMLDivElement>): void => {
     const d = dragRef.current
@@ -382,17 +419,17 @@ export function UsageHistoryDialog({
     }
     // dragging RIGHT (positive dx) moves the window BACK in time — the content follows the hand.
     // The pin point is the exact px of real travel available toward the bound in this direction;
-    // everything past it rubber-bands (resist starts at 0 there, so the hand-off is seamless)
-    const boundKey = dx >= 0 ? earliestDay! : todayKey // canPan ⇒ earliestDay non-null
-    const maxPx = (-dayDiff(d.startAnchor, boundKey) / daysPerStep) * PITCH // ≥0 right, ≤0 left
+    // everything past it rubber-bands (resist starts at 0 there, so the hand-off is seamless).
+    const boundKey = dx >= 0 ? BROWSE_MIN_DAY : maxStartKey
+    const maxPx = (-dayDiff(d.startWindow, boundKey) / daysPerStep) * PITCH // ≥0 right, ≤0 left
     if (dx >= 0 ? dx > maxPx : dx < maxPx) {
-      setAnchorKey(boundKey >= todayKey ? null : boundKey)
+      writeWindowStart(boundKey)
       const over = dx - maxPx
       setPanX(Math.sign(over) * resist(Math.abs(over)))
     } else {
       const steps = Math.trunc(dx / PITCH)
-      const next = clampDayKey(keyAddDays(d.startAnchor, -steps * daysPerStep))
-      setAnchorKey(next >= todayKey ? null : next)
+      const next = clampKey(keyAddDays(d.startWindow, -steps * daysPerStep), BROWSE_MIN_DAY, maxStartKey)
+      writeWindowStart(next)
       setPanX(dx - steps * PITCH) // sub-step remainder: smooth glide between quantised steps
     }
   }
@@ -431,20 +468,15 @@ export function UsageHistoryDialog({
   const dateLabel = (d: Date): string =>
     d.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric', weekday: 'short' })
 
-  // range annotation: the friendly relative label while following today; the explicit window
-  // (start – anchor, year only when it isn't the current one) once panned back
   const shortDate = (d: Date): string =>
     d.toLocaleDateString(locale, {
       month: 'short',
       day: 'numeric',
       ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' as const } : {})
     })
+  const explicitRange = `${shortDate(windowStart)} – ${shortDate(windowEnd)}`
   const rangeLabel =
-    anchorKey === null
-      ? mode === 'heat'
-        ? t('uh.rangeHeat')
-        : t('uh.rangeBars')
-      : `${shortDate(rangeStart)} – ${shortDate(anchor)}`
+    windowStartKey === null ? `${t(chartMode === 'heat' ? 'uh.rangeHeat' : 'uh.rangeBars')} · ${explicitRange}` : explicitRange
 
   // ── breakdown-list actions (app frame → credential entries; credential frame → api keys) ──
   const drillDown = (e: UsageHistoryChildEntry): void => {
@@ -510,11 +542,11 @@ export function UsageHistoryDialog({
             {currentName}
           </span>
         </div>
-        <div className="relative flex shrink-0 items-center gap-1.5">
-          {mode !== 'list' && anchorKey !== null && (
+        <div ref={calendarControlsRef} className="relative flex shrink-0 items-center gap-1.5">
+          {mode !== 'list' && windowStartKey !== null && (
             <button
               onClick={() => {
-                setAnchorKey(null)
+                setWindowStartKey(null)
                 setTip(null)
               }}
               className="rounded-[6px] border-2 border-ink/30 px-1.5 py-0.5 text-xs transition hover:bg-ink/5"
@@ -525,11 +557,10 @@ export function UsageHistoryDialog({
           {mode !== 'list' && (
             <button
               title={t('uh.jumpDate')}
-              disabled={!canPan}
               onClick={() => setCalOpen((v) => !v)}
-              className="rounded-[7px] border-2 border-ink/30 px-1.5 py-0.5 text-sm transition enabled:hover:bg-ink/5 disabled:opacity-40"
+              className="rounded-[7px] border-2 border-ink/30 px-1.5 py-0.5 text-sm transition hover:bg-ink/5"
             >
-              📅
+              <DoodleCalendarIcon className="h-[18px] w-[18px]" />
             </button>
           )}
           <div className="doodle-edge flex shrink-0 gap-1 rounded-[10px] border-2 border-ink/40 p-1 text-sm">
@@ -560,13 +591,15 @@ export function UsageHistoryDialog({
             transition={{ height: { type: 'spring', stiffness: 320, damping: 26 }, opacity: { duration: 0.15 } }}
             style={{ overflow: 'hidden' }}
           >
-            <div className="doodle-edge mx-auto mt-1 w-64 rounded-[10px] border-2 border-ink/70 bg-card shadow-doodle">
+            <div ref={calendarPopupRef} className="doodle-edge mx-auto mt-1 w-[21rem] rounded-[10px] border-2 border-ink/70 bg-card shadow-doodle">
               <DoodleCalendar
-                value={anchorDayKey}
-                minDay={earliestDay ?? undefined}
-                maxDay={todayKey}
+                value={visibleStartKey}
+                minDay={BROWSE_MIN_DAY}
+                maxDay={maxStartKey}
+                rangeStart={visibleStartKey}
+                rangeEnd={visibleEndKey}
                 onPick={(day) => {
-                  setAnchorKey(day >= todayKey ? null : day)
+                  writeWindowStart(day)
                   setTip(null)
                   setCalOpen(false)
                 }}
@@ -601,7 +634,8 @@ export function UsageHistoryDialog({
                   theme={theme}
                   locale={locale}
                   t={t}
-                  anchor={anchor}
+                  windowStart={windowStart}
+                  windowEnd={windowEnd}
                   gridStart={gridStart}
                   maxDayTotal={stats.maxDayTotal}
                   dayInfo={dayInfo}
@@ -616,7 +650,7 @@ export function UsageHistoryDialog({
                 <BarsChart
                   t={t}
                   locale={locale}
-                  anchor={anchor}
+                  windowStart={windowStart}
                   maxDayTotal={stats.maxDayTotal}
                   slot={stats.slot}
                   dayInfo={dayInfo}
@@ -752,8 +786,8 @@ function BreakdownList({
               🗑
             </button>
           </div>
-        )
-      })}
+        )}
+      )}
     </div>
   )
 }
@@ -800,13 +834,14 @@ function TipCard({
   )
 }
 
-/** GitHub-style contribution calendar: 27 Monday-first weeks of green-ramp cells, ENDING on the
- *  anchor day (today unless panned back) — cells beyond the anchor are simply skipped. */
+/** GitHub-style contribution calendar: 27 Monday-first weeks drawn from the selected START date.
+ *  Days before the picked start stay faint so the partial first week still reads as a calendar. */
 function HeatGrid({
   theme,
   locale,
   t,
-  anchor,
+  windowStart,
+  windowEnd,
   gridStart,
   maxDayTotal,
   dayInfo,
@@ -820,7 +855,8 @@ function HeatGrid({
   theme: 'paper' | 'dark'
   locale: string
   t: (k: string, v?: Record<string, string | number>) => string
-  anchor: Date
+  windowStart: Date
+  windowEnd: Date
   gridStart: Date
   maxDayTotal: number
   dayInfo: (d: Date) => DayInfo
@@ -838,7 +874,7 @@ function HeatGrid({
   const ramp = HEAT[theme]
 
   // month labels: mark each column whose Monday lands in a new month (skip cramped repeats);
-  // labels on the last two columns anchor to the right edge so they can't clip past the SVG
+  // labels on the last two columns anchor to the right edge so they can't clip past the SVG.
   const monthLabels: { x: number; text: string; end: boolean }[] = []
   let lastMonth = -1
   let lastLabelCol = -10
@@ -862,12 +898,12 @@ function HeatGrid({
   for (let w = 0; w < HEAT_WEEKS; w++) {
     for (let r = 0; r < 7; r++) {
       const date = addDays(gridStart, w * 7 + r)
-      if (date.getTime() > anchor.getTime()) continue
+      const inWindow = date.getTime() >= windowStart.getTime() && date.getTime() <= windowEnd.getTime()
       const info = dayInfo(date)
       const x = LEFT + w * PITCH
       const y = TOP + r * PITCH
       const level =
-        info.total <= 0 || maxDayTotal <= 0
+        !inWindow || info.total <= 0 || maxDayTotal <= 0
           ? -1
           : Math.min(3, Math.ceil((4 * info.total) / maxDayTotal) - 1)
       const active = tipKey === info.key
@@ -879,24 +915,31 @@ function HeatGrid({
           width={CELL}
           height={CELL}
           rx={3}
-          className={`${level < 0 ? 'fill-ink/10' : ''} ${active ? 'stroke-ink/70' : ''}`.trim() || undefined}
+          className={[
+            level < 0 ? (!inWindow ? 'fill-ink/10 opacity-35' : 'fill-ink/10') : '',
+            active ? 'stroke-ink/70' : ''
+          ]
+            .filter(Boolean)
+            .join(' ') || undefined}
           fill={level < 0 ? undefined : ramp[level]}
           strokeWidth={active ? 1.5 : 0}
           pointerEvents="none"
         />
       )
-      hits.push(
-        <rect
-          key={`h-${info.key}`}
-          x={x - 1}
-          y={y - 1}
-          width={PITCH}
-          height={PITCH}
-          fill="transparent"
-          onMouseEnter={() => showTip(info, x + CELL / 2, y, svgW)}
-          onMouseLeave={hideTip}
-        />
-      )
+      if (inWindow) {
+        hits.push(
+          <rect
+            key={`h-${info.key}`}
+            x={x - 1}
+            y={y - 1}
+            width={PITCH}
+            height={PITCH}
+            fill="transparent"
+            onMouseEnter={() => showTip(info, x + CELL / 2, y, svgW)}
+            onMouseLeave={hideTip}
+          />
+        )
+      }
     }
   }
 
@@ -950,12 +993,12 @@ function HeatGrid({
   )
 }
 
-/** 30-day stacked columns ENDING on the anchor day: one ≤24px bar per day, segments = models (2px
- *  surface gaps), rounded data-end on the top segment only, hairline gridlines + compact ticks. */
+/** 30-day stacked columns STARTING on the selected day: one ≤24px bar per day, segments = models
+ *  (2px surface gaps), rounded data-end on the top segment only, hairline gridlines + compact ticks. */
 function BarsChart({
   t,
   locale,
-  anchor,
+  windowStart,
   maxDayTotal,
   slot,
   dayInfo,
@@ -968,7 +1011,7 @@ function BarsChart({
 }: {
   t: (k: string, v?: Record<string, string | number>) => string
   locale: string
-  anchor: Date
+  windowStart: Date
   maxDayTotal: number
   slot: Map<string, number>
   dayInfo: (d: Date) => DayInfo
@@ -986,22 +1029,21 @@ function BarsChart({
   const AXIS_H = 18
   const svgW = LEFT + BAR_DAYS * PITCH - (PITCH - CELL) + RIGHT
   const svgH = TOP + PLOT_H + AXIS_H
-  const niceMax = niceCeil(maxDayTotal)
+  const empty = maxDayTotal <= 0
+  const niceMax = empty ? 1 : niceCeil(maxDayTotal)
   const yOf = (tokens: number): number => TOP + PLOT_H * (1 - tokens / niceMax)
 
   const bars: JSX.Element[] = []
   const hits: JSX.Element[] = []
   for (let i = 0; i < BAR_DAYS; i++) {
-    const date = addDays(anchor, i - (BAR_DAYS - 1))
+    const date = addDays(windowStart, i)
     const info = dayInfo(date)
     const x = LEFT + i * PITCH
     if (info.total > 0) {
       // stack in fixed slot order, most-used model of the RANGE at the baseline — the same model
-      // keeps the same color and position across all 30 days
-      const segs = [...info.entries].sort(
-        (a, b) => (slot.get(a.model) ?? 99) - (slot.get(b.model) ?? 99)
-      )
-      // models past the 8 hue slots merge into a single gray "other" segment (hues never cycle)
+      // keeps the same color and position across all 30 days.
+      const segs = [...info.entries].sort((a, b) => (slot.get(a.model) ?? 99) - (slot.get(b.model) ?? 99))
+      // models past the 8 hue slots merge into a single gray "other" segment (hues never cycle).
       const drawn: { color: string; tokens: number }[] = []
       for (const e of segs) {
         const s = slot.get(e.model) ?? 99
@@ -1069,7 +1111,7 @@ function BarsChart({
   const xLabels: JSX.Element[] = []
   for (let i = 0; i < BAR_DAYS; i++) {
     if ((BAR_DAYS - 1 - i) % 5 !== 0) continue
-    const date = addDays(anchor, i - (BAR_DAYS - 1))
+    const date = addDays(windowStart, i)
     xLabels.push(
       <text
         key={i}
@@ -1094,22 +1136,23 @@ function BarsChart({
       onPointerCancel={pan.onPointerCancel}
     >
       <svg ref={pan.svgRef} width={svgW} height={svgH} className="block font-doodle">
-        {/* hairline gridlines + compact tick values (they carry the values bars don't label) */}
-        {[0.5, 1].map((f) => (
-          <g key={f}>
-            <line
-              x1={LEFT - 2}
-              x2={svgW - RIGHT}
-              y1={yOf(niceMax * f)}
-              y2={yOf(niceMax * f)}
-              className="stroke-ink/15"
-              strokeWidth={1}
-            />
-            <text x={LEFT - 6} y={yOf(niceMax * f) + 3} textAnchor="end" className="mono fill-ink/50 text-[9px]">
-              {tickLabel(niceMax * f)}
-            </text>
-          </g>
-        ))}
+        {/* hairline gridlines + compact tick values (they carry the values bars don't label). */}
+        {!empty &&
+          ([0.5, 1] as const).map((f) => (
+            <g key={f}>
+              <line
+                x1={LEFT - 2}
+                x2={svgW - RIGHT}
+                y1={yOf(niceMax * f)}
+                y2={yOf(niceMax * f)}
+                className="stroke-ink/15"
+                strokeWidth={1}
+              />
+              <text x={LEFT - 6} y={yOf(niceMax * f) + 3} textAnchor="end" className="mono fill-ink/50 text-[9px]">
+                {tickLabel(niceMax * f)}
+              </text>
+            </g>
+          ))}
         {/* baseline */}
         <line
           x1={LEFT - 2}

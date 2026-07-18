@@ -229,6 +229,7 @@ const DICT: Record<string, Entry> = {
 
   // ── hand-drawn calendar (date jump) ──
   'cal.today': { zh: '今天', en: 'Today' },
+  'cal.pickYear': { zh: '快速选年份', en: 'Pick year' },
   'cal.prevMonth': { zh: '上个月', en: 'Previous month' },
   'cal.nextMonth': { zh: '下个月', en: 'Next month' },
   'cal.dow.sun': { zh: '日', en: 'Su' },
