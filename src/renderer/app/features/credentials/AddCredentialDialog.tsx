@@ -55,7 +55,6 @@ export function AddCredentialDialog({
 }): JSX.Element {
   const select = useStore((s) => s.select)
   const toast = useStore((s) => s.toast)
-  const askConfirm = useStore((s) => s.askConfirm)
   const t = useT()
 
   const [provider, setProvider] = useState<Provider>('openai')
@@ -104,14 +103,6 @@ export function AddCredentialDialog({
     void cancelOAuth()
   }
 
-  const maybeEnableSameKeyMode = async (credentialId: string): Promise<void> => {
-    const cred = await api.query('credentials.get', { id: credentialId })
-    if (!cred?.sameApiKey || cred.sameApiKey.modeEnabled || !cred.sameApiKey.duplicated) return
-    if (!(await askConfirm(t('add.sameKeyConfirm', { n: Math.max(1, cred.sameApiKey.groupSize - 1) })))) return
-    await api.command('credentials.setSameApiKeyMode', { id: credentialId, enabled: true })
-    toast('success', t('detail.sameKeyModeEnabled'))
-  }
-
   const cancelOAuth = async (): Promise<void> => {
     if (session) {
       await api.command('oauth.cancel', { sessionId: session.id })
@@ -149,7 +140,6 @@ export function AddCredentialDialog({
     setSaving(true)
     try {
       const cred = await api.command('credentials.createApiKey', { provider, name, baseUrl, apiKey })
-      await maybeEnableSameKeyMode(cred.id)
       toast('success', t('add.added'))
       select(cred.id)
       onClose()

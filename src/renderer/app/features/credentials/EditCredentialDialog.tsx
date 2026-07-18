@@ -18,7 +18,6 @@ export function EditCredentialDialog({
   onClose: () => void
 }): JSX.Element {
   const toast = useStore((s) => s.toast)
-  const askConfirm = useStore((s) => s.askConfirm)
   const tr = useT()
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
@@ -39,14 +38,6 @@ export function EditCredentialDialog({
   if (!credential) return <DialogShell open={false} onClose={onClose} title={tr('edit.title')}>{null}</DialogShell>
   const isApiKey = credential.kind === 'apikey'
 
-  const maybeEnableSameKeyMode = async (credentialId: string): Promise<void> => {
-    const cred = await api.query('credentials.get', { id: credentialId })
-    if (!cred?.sameApiKey || cred.sameApiKey.modeEnabled || !cred.sameApiKey.duplicated) return
-    if (!(await askConfirm(tr('edit.sameKeyConfirm', { n: Math.max(1, cred.sameApiKey.groupSize - 1) })))) return
-    await api.command('credentials.setSameApiKeyMode', { id: credentialId, enabled: true })
-    toast('success', tr('detail.sameKeyModeEnabled'))
-  }
-
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
@@ -58,7 +49,6 @@ export function EditCredentialDialog({
           ...(isApiKey && apiKey.trim() ? { apiKey } : {})
         }
       })
-      if (isApiKey && apiKey.trim()) await maybeEnableSameKeyMode(credential.id)
       toast('success', tr('edit.saved'))
       onClose()
     } catch (e) {

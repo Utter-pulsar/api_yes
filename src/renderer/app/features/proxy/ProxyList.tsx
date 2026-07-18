@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { CredentialView, ProxyEndpoint, ProxyServerStatus } from '@shared/types'
 import { api } from '../../lib/bridge'
@@ -22,10 +22,34 @@ interface ProxySameKeyInfo {
   active: boolean
 }
 
+interface ProxyOpenPrefs {
+  globalExpanded: boolean
+  byCredential: Record<string, boolean>
+}
+
 const EMPTY_UI: ProxyOpenUi = { pinnedIds: [], hoveredId: null, suppressedIds: [] }
+const OPEN_PREFS_KEY = 'api-yes-proxy-open-prefs'
 
 function uniqueIds(ids: string[]): string[] {
   return Array.from(new Set(ids))
+}
+
+function readOpenPrefs(): ProxyOpenPrefs {
+  try {
+    const raw = localStorage.getItem(OPEN_PREFS_KEY)
+    if (!raw) return { globalExpanded: false, byCredential: {} }
+    const parsed = JSON.parse(raw) as Partial<ProxyOpenPrefs>
+    return {
+      globalExpanded: parsed.globalExpanded === true,
+      byCredential: parsed.byCredential && typeof parsed.byCredential === 'object' ? parsed.byCredential : {}
+    }
+  } catch {
+    return { globalExpanded: false, byCredential: {} }
+  }
+}
+
+function writeOpenPrefs(prefs: ProxyOpenPrefs): void {
+  localStorage.setItem(OPEN_PREFS_KEY, JSON.stringify(prefs))
 }
 
 function buildSameKeyInfoMap(proxies: ProxyEndpoint[]): Map<string, ProxySameKeyInfo> {
@@ -75,27 +99,111 @@ export function ProxyList({ credential }: { credential: CredentialView }): JSX.E
   const [historyId, setHistoryId] = useState<string | null>(null)
   const historyProxy = proxies.find((p) => p.id === historyId)
   const [uiByCredential, setUiByCredential] = useState<Record<string, ProxyOpenUi>>({})
+  const [openPrefs, setOpenPrefs] = useState<ProxyOpenPrefs>(readOpenPrefs)
+  const clickTimer = useRef<number | undefined>(undefined)
 
   const ui = uiByCredential[credential.id] ?? EMPTY_UI
   const patchUi = (updater: (prev: ProxyOpenUi) => ProxyOpenUi): void => {
     setUiByCredential((prev) => ({ ...prev, [credential.id]: updater(prev[credential.id] ?? EMPTY_UI) }))
   }
+  const saveOpenPrefs = (updater: (prev: ProxyOpenPrefs) => ProxyOpenPrefs): void => {
+    setOpenPrefs((prev) => {
+      const next = updater(prev)
+      writeOpenPrefs(next)
+      return next
+    })
+  }
+
+  const credentialDefaultExpanded = openPrefs.byCredential[credential.id] ?? openPrefs.globalExpanded
+
+  useEffect(
+    () => () => {
+      if (clickTimer.current) window.clearTimeout(clickTimer.current)
+    },
+    []
+  )
 
   useEffect(() => {
     const existing = new Set(proxies.map((p) => p.id))
-    patchUi((prev) => ({
-      pinnedIds: prev.pinnedIds.filter((id) => existing.has(id)),
-      hoveredId: prev.hoveredId && existing.has(prev.hoveredId) ? prev.hoveredId : null,
-      suppressedIds: prev.suppressedIds.filter((id) => existing.has(id))
-    }))
+    setUiByCredential((prev) => {
+      const current = prev[credential.id]
+      if (!current) {
+        return {
+          ...prev,
+          [credential.id]: {
+            pinnedIds: credentialDefaultExpanded ? proxies.map((p) => p.id) : [],
+            hoveredId: null,
+            suppressedIds: []
+          }
+        }
+      }
+      return {
+        ...prev,
+        [credential.id]: {
+          pinnedIds: current.pinnedIds.filter((id) => existing.has(id)),
+          hoveredId: current.hoveredId && existing.has(current.hoveredId) ? current.hoveredId : null,
+          suppressedIds: current.suppressedIds.filter((id) => existing.has(id))
+        }
+      }
+    })
     if (historyId && !existing.has(historyId)) setHistoryId(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [credential.id, proxies, historyId])
+  }, [credential.id, credentialDefaultExpanded, historyId, proxies])
 
   const pinnedSet = useMemo(() => new Set(ui.pinnedIds), [ui.pinnedIds])
   const suppressedSet = useMemo(() => new Set(ui.suppressedIds), [ui.suppressedIds])
   const sameKeyInfoById = useMemo(() => buildSameKeyInfoMap(allProxies), [allProxies])
-  const allExpanded = proxies.length > 0 && proxies.every((p) => pinnedSet.has(p.id))
+
+  const setCurrentDefaultExpanded = (expanded: boolean): void => {
+    saveOpenPrefs((prev) => {
+      const byCredential = { ...prev.byCredential }
+      if (expanded === prev.globalExpanded) delete byCredential[credential.id]
+      else byCredential[credential.id] = expanded
+      return { ...prev, byCredential }
+    })
+    setUiByCredential((prev) => ({
+      ...prev,
+      [credential.id]: {
+        pinnedIds: expanded ? proxies.map((p) => p.id) : [],
+        hoveredId: null,
+        suppressedIds: []
+      }
+    }))
+  }
+
+  const setGlobalDefaultExpanded = (expanded: boolean): void => {
+    saveOpenPrefs(() => ({ globalExpanded: expanded, byCredential: {} }))
+    const grouped = new Map<string, string[]>()
+    for (const proxy of allProxies) {
+      const ids = grouped.get(proxy.credentialId)
+      if (ids) ids.push(proxy.id)
+      else grouped.set(proxy.credentialId, [proxy.id])
+    }
+    if (!grouped.has(credential.id)) grouped.set(credential.id, [])
+    setUiByCredential(
+      Object.fromEntries(
+        [...grouped.entries()].map(([credentialId, ids]) => [
+          credentialId,
+          { pinnedIds: expanded ? ids : [], hoveredId: null, suppressedIds: [] }
+        ])
+      )
+    )
+  }
+
+  const handleDefaultToggleClick = (): void => {
+    if (clickTimer.current) window.clearTimeout(clickTimer.current)
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = undefined
+      setCurrentDefaultExpanded(!credentialDefaultExpanded)
+    }, 220)
+  }
+
+  const handleDefaultToggleDoubleClick = (): void => {
+    if (clickTimer.current) {
+      window.clearTimeout(clickTimer.current)
+      clickTimer.current = undefined
+    }
+    setGlobalDefaultExpanded(!credentialDefaultExpanded)
+  }
 
   const maybeEnableSameKeyMode = async (proxy: ProxyEndpoint): Promise<void> => {
     const snapshot = allProxies.some((p) => p.id === proxy.id)
@@ -150,13 +258,6 @@ export function ProxyList({ credential }: { credential: CredentialView }): JSX.E
       suppressedIds: uniqueIds([...prev.suppressedIds, id]),
       hoveredId: prev.hoveredId === id ? id : prev.hoveredId
     }))
-  const toggleAll = (): void => {
-    patchUi((prev) =>
-      allExpanded
-        ? { ...prev, pinnedIds: [], hoveredId: null, suppressedIds: [] }
-        : { ...prev, pinnedIds: proxies.map((p) => p.id), hoveredId: null, suppressedIds: [] }
-    )
-  }
 
   const create = async (): Promise<void> => {
     const name = await askPrompt(t('api.namePrompt'), t('api.defaultName', { n: proxies.length + 1 }))
@@ -180,8 +281,14 @@ export function ProxyList({ credential }: { credential: CredentialView }): JSX.E
         <h3 className="font-doodle text-lg font-bold">{t('api.title')}</h3>
         <div className="flex flex-wrap items-center gap-2">
           {proxies.length > 0 && (
-            <DoodleButton variant="default" className="text-sm" onClick={toggleAll}>
-              {allExpanded ? t('api.collapseAll') : t('api.expandAll')}
+            <DoodleButton
+              variant="default"
+              className="text-sm"
+              title={t('api.defaultToggleHint')}
+              onClick={handleDefaultToggleClick}
+              onDoubleClick={handleDefaultToggleDoubleClick}
+            >
+              {credentialDefaultExpanded ? t('api.collapseAll') : t('api.expandAll')}
             </DoodleButton>
           )}
           <DoodleButton variant="primary" className="text-sm" disabled={creating} onClick={() => void create()}>

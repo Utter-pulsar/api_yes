@@ -64,14 +64,6 @@ export function CredentialDetail(): JSX.Element {
     )
   }
 
-  const sameApiKey = credential.sameApiKey
-  const sameApiKeyText = sameApiKey
-    ? t('detail.sameKeyHint', {
-        n: Math.max(1, sameApiKey.groupSize - 1),
-        state: sameApiKey.active ? t('detail.sameKeyActive') : t('detail.sameKeyInactive')
-      })
-    : null
-
   const expiresLabel = credential.expiresAt
     ? credential.expiresAt > Date.now()
       ? t('detail.tokenValid', {
@@ -101,21 +93,6 @@ export function CredentialDetail(): JSX.Element {
     await api.command('credentials.delete', { id: credential.id })
     toast('success', t('detail.deleted'))
   }
-  const enableSameKeyMode = async (): Promise<void> => {
-    try {
-      await api.command('credentials.setSameApiKeyMode', { id: credential.id, enabled: true })
-      toast('success', t('detail.sameKeyModeEnabled'))
-    } catch (e) {
-      toast('error', e instanceof Error ? e.message : String(e))
-    }
-  }
-  const toggleSameKeyActive = async (active: boolean): Promise<void> => {
-    try {
-      await api.command('credentials.setSameApiKeyActive', { id: credential.id, active })
-    } catch (e) {
-      toast('error', e instanceof Error ? e.message : String(e))
-    }
-  }
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col">
@@ -142,29 +119,6 @@ export function CredentialDetail(): JSX.Element {
           {!credential.enabled && (
             <div className="doodle-edge rounded-[8px] border-2 border-marker-coral bg-marker-coral/10 px-3 py-1.5 text-sm text-marker-coral">
               {t('detail.disabledBanner')}
-            </div>
-          )}
-
-          {credential.kind === 'apikey' && sameApiKey && !sameApiKey.modeEnabled && (
-            <div className="doodle-edge flex flex-wrap items-center gap-3 rounded-[10px] border-2 border-marker-yellow/60 bg-marker-yellow/15 px-3 py-2 text-sm">
-              <div className="flex-1 leading-relaxed">{t('detail.sameKeyPromptBanner', { n: Math.max(1, sameApiKey.groupSize - 1) })}</div>
-              <DoodleButton variant="primary" className="text-sm" onClick={() => void enableSameKeyMode()}>
-                {t('detail.sameKeyEnableCta')}
-              </DoodleButton>
-            </div>
-          )}
-
-          {credential.kind === 'apikey' && sameApiKey?.modeEnabled && (
-            <div className="doodle-edge flex flex-wrap items-center gap-3 rounded-[10px] border-2 border-marker-knot/50 bg-marker-knot/10 px-3 py-2 text-sm">
-              <div className="flex-1 leading-relaxed">{sameApiKeyText}</div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm opacity-65">{t('detail.sameKeyToggle')}</span>
-                <DoodleToggle
-                  label={t('detail.sameKeyToggle')}
-                  checked={sameApiKey.active}
-                  onChange={(v) => void toggleSameKeyActive(v)}
-                />
-              </div>
             </div>
           )}
 
