@@ -7,6 +7,7 @@ import type {
   CredentialView,
   OAuthAccount,
   ProxyEndpoint,
+  SameApiKeyInfo,
   UsageHistoryStore,
   UsageHistoryTree
 } from '@shared/types'
@@ -44,6 +45,9 @@ export interface StoredCredential {
   updatedAt: number
   order: number
   lastTest?: TestResult
+  /** duplicate-key coordination (apikey only): renderer-safe metadata is DERIVED from these */
+  sameApiKeyMode?: boolean
+  sameApiKeyActive?: boolean
   // secret payload (one of these, depending on kind)
   apiKey?: string
   oauth?: OAuthTokens
@@ -115,6 +119,154 @@ function decodeSecret(p: PersistedCredential): Pick<StoredCredential, 'apiKey' |
   }
 }
 
+function sameApiKeyGroup(target: StoredCredential, credentials: StoredCredential[]): StoredCredential[] {
+  const key = target.kind === 'apikey' ? target.apiKey?.trim() : undefined
+  if (!key) return []
+  return credentials.filter((c) => c.kind === 'apikey' && c.apiKey?.trim() === key)
+}
+
+type SameApiKeyFlag = 'sameApiKeyMode' | 'sameApiKeyActive'
+function setSameApiKeyFlag(c: StoredCredential, key: SameApiKeyFlag, value: boolean | undefined): boolean {
+  if (value === undefined) {
+    if (c[key] !== undefined) {
+      delete c[key]
+      return true
+    }
+    return false
+  }
+  if (c[key] !== value) {
+    c[key] = value
+    return true
+  }
+  return false
+}
+
+/** Keep duplicate-key mode flags coherent after any credential create/update/delete/load. */
+export function normalizeSameApiKeyState(credentials: StoredCredential[]): boolean {
+  let changed = false
+  const duplicatedIds = new Set<Id>()
+  const groups = new Map<string, StoredCredential[]>()
+
+  for (const c of credentials) {
+    const key = c.kind === 'apikey' ? c.apiKey?.trim() : undefined
+    if (!key) continue
+    const group = groups.get(key)
+    if (group) group.push(c)
+    else groups.set(key, [c])
+  }
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    group.forEach((c) => duplicatedIds.add(c.id))
+
+    const modeEnabled = group.some((c) => c.sameApiKeyMode === true)
+    if (!modeEnabled) {
+      for (const c of group) {
+        changed = setSameApiKeyFlag(c, 'sameApiKeyMode', undefined) || changed
+        changed = setSameApiKeyFlag(c, 'sameApiKeyActive', undefined) || changed
+      }
+      continue
+    }
+
+    const active = group
+      .filter((c) => c.sameApiKeyActive === true)
+      .sort((a, b) => a.order - b.order)
+    const activeId = active[0]?.id
+
+    for (const c of group) {
+      changed = setSameApiKeyFlag(c, 'sameApiKeyMode', true) || changed
+      changed = setSameApiKeyFlag(c, 'sameApiKeyActive', activeId ? c.id === activeId : false) || changed
+    }
+  }
+
+  for (const c of credentials) {
+    if (duplicatedIds.has(c.id)) continue
+    changed = setSameApiKeyFlag(c, 'sameApiKeyMode', undefined) || changed
+    changed = setSameApiKeyFlag(c, 'sameApiKeyActive', undefined) || changed
+  }
+
+  return changed
+}
+
+type SameProxyKeyFlag = 'sameKeyMode' | 'sameKeyActive'
+function setSameProxyKeyFlag(p: ProxyEndpoint, key: SameProxyKeyFlag, value: boolean | undefined): boolean {
+  if (value === undefined) {
+    if (p[key] !== undefined) {
+      delete p[key]
+      return true
+    }
+    return false
+  }
+  if (p[key] !== value) {
+    p[key] = value
+    return true
+  }
+  return false
+}
+
+/** Keep duplicate local-proxy-key mode flags coherent after any proxy create/update/delete/load. */
+export function normalizeSameProxyKeyState(proxies: ProxyEndpoint[]): boolean {
+  let changed = false
+  const duplicatedIds = new Set<Id>()
+  const groups = new Map<string, ProxyEndpoint[]>()
+
+  for (const p of proxies) {
+    const key = p.key.trim()
+    if (!key) continue
+    const group = groups.get(key)
+    if (group) group.push(p)
+    else groups.set(key, [p])
+  }
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    group.forEach((p) => duplicatedIds.add(p.id))
+
+    const modeEnabled = group.some((p) => p.sameKeyMode === true)
+    if (!modeEnabled) {
+      for (const p of group) {
+        changed = setSameProxyKeyFlag(p, 'sameKeyMode', undefined) || changed
+        changed = setSameProxyKeyFlag(p, 'sameKeyActive', undefined) || changed
+      }
+      continue
+    }
+
+    const active = group
+      .filter((p) => p.sameKeyActive === true)
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+    const activeId = active[0]?.id
+
+    for (const p of group) {
+      changed = setSameProxyKeyFlag(p, 'sameKeyMode', true) || changed
+      changed = setSameProxyKeyFlag(p, 'sameKeyActive', activeId ? p.id === activeId : false) || changed
+    }
+  }
+
+  for (const p of proxies) {
+    if (duplicatedIds.has(p.id)) continue
+    changed = setSameProxyKeyFlag(p, 'sameKeyMode', undefined) || changed
+    changed = setSameProxyKeyFlag(p, 'sameKeyActive', undefined) || changed
+  }
+
+  return changed
+}
+
+/** Derived duplicate-key metadata; exact comparison stays in main because the raw key never leaves it. */
+export function getSameApiKeyInfo(
+  credential: StoredCredential,
+  credentials: StoredCredential[]
+): SameApiKeyInfo | undefined {
+  const group = sameApiKeyGroup(credential, credentials)
+  if (group.length < 2) return undefined
+  const modeEnabled = group.some((c) => c.sameApiKeyMode === true)
+  return {
+    duplicated: true,
+    groupSize: group.length,
+    modeEnabled,
+    active: modeEnabled && credential.sameApiKeyActive === true
+  }
+}
+
 /**
  * Plain-JSON persistence (no native build → ships identically cross-platform). The whole DB is
  * tiny and lives in memory; mutations write through to disk (debounced) atomically (tmp + rename).
@@ -149,6 +301,8 @@ export class Store {
     // self-healing pass, every boot: fold usage the lifetime counters have but the daily ledgers
     // miss (pre-ledger versions, streams the app was killed inside) so both views stay in step
     if (reconcileHistoryWithCounters(db)) needsWrite = true
+    if (normalizeSameApiKeyState(db.credentials)) needsWrite = true
+    if (normalizeSameProxyKeyState(db.proxies)) needsWrite = true
     const store = new Store(path, db)
     if (needsWrite) store.flush()
     return store
@@ -229,7 +383,10 @@ export class Store {
 }
 
 /** Strip the secret payload → the renderer-safe credential view. */
-export function toCredentialView(c: StoredCredential): CredentialView {
+export function toCredentialView(
+  c: StoredCredential,
+  allCredentials: StoredCredential[] = [c]
+): CredentialView {
   const view: CredentialView = {
     id: c.id,
     name: c.name,
@@ -242,7 +399,11 @@ export function toCredentialView(c: StoredCredential): CredentialView {
     order: c.order,
     lastTest: c.lastTest
   }
-  if (c.kind === 'apikey' && c.apiKey) view.keyPreview = maskKey(c.apiKey)
+  if (c.kind === 'apikey' && c.apiKey) {
+    view.keyPreview = maskKey(c.apiKey)
+    const sameApiKey = getSameApiKeyInfo(c, allCredentials)
+    if (sameApiKey) view.sameApiKey = sameApiKey
+  }
   if (c.kind === 'oauth' && c.oauth) {
     view.account = c.oauth.account
     view.expiresAt = c.oauth.expiresAt

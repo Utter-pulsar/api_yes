@@ -33,6 +33,9 @@ export interface ProxyEndpoint {
   name: string
   /** the local proxy key the user gives to their client — shown in full (it is a LOCAL key) */
   key: string
+  /** duplicate-local-key coordination: when mode is on, only one same-key endpoint is active */
+  sameKeyMode?: boolean
+  sameKeyActive?: boolean
   enabled: boolean
   /** exposure for THIS key: true (default) = loopback-only even when the server is on 0.0.0.0;
    *  false = reachable from the LAN. Each key has its own scope + its own URL. */

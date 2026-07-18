@@ -69,7 +69,8 @@ export async function ensureAccessToken(core: AppCore, cred: StoredCredential): 
       c.updatedAt = Date.now()
     }
   })
-  core.broadcast('credentials.changed', core.store.data.credentials.map(toCredentialView))
+  const credentials = core.store.data.credentials.slice().sort((a, b) => a.order - b.order)
+  core.broadcast('credentials.changed', credentials.map((c) => toCredentialView(c, credentials)))
   return merged.accessToken
 }
 

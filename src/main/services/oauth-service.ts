@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { shell } from 'electron'
 import type { CredentialView, Provider, TestResult } from '@shared/types'
 import type { AppCore } from './context'
-import { toCredentialView, type OAuthTokens, type StoredCredential } from './store'
+import { normalizeSameApiKeyState, toCredentialView, type OAuthTokens, type StoredCredential } from './store'
 import { beginAnthropicAuth, exchangeAnthropicCode, splitPastedCode } from './oauth/anthropic-oauth'
 import { beginOpenAIAuth, exchangeOpenAICode, OPENAI_OAUTH } from './oauth/openai-oauth'
 import type { Pkce } from './oauth/pkce'
@@ -33,11 +33,10 @@ h1{margin:.2em 0;font-size:22px}p{opacity:.7}
 export function registerOAuthService(core: AppCore): void {
   const sessions = new Map<string, OAuthSession>()
 
-  const views = (): CredentialView[] =>
-    core.store.data.credentials
-      .slice()
-      .sort((a, b) => a.order - b.order)
-      .map(toCredentialView)
+  const views = (): CredentialView[] => {
+    const credentials = core.store.data.credentials.slice().sort((a, b) => a.order - b.order)
+    return credentials.map((c) => toCredentialView(c, credentials))
+  }
 
   const createCredential = (provider: Provider, name: string | undefined, tokens: OAuthTokens): StoredCredential => {
     const now = Date.now()
@@ -54,7 +53,10 @@ export function registerOAuthService(core: AppCore): void {
       updatedAt: now,
       order
     }
-    core.store.mutate((db) => db.credentials.push(cred))
+    core.store.mutate((db) => {
+      db.credentials.push(cred)
+      normalizeSameApiKeyState(db.credentials)
+    })
     core.broadcast('credentials.changed', views())
     return cred
   }

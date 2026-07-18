@@ -6,12 +6,30 @@ import type { ProxyServer } from './proxy-server'
 import { getProxyLeaf } from './usage-history'
 import { generateProxyKey } from './keygen'
 import { mt } from './i18n'
+import { normalizeSameProxyKeyState } from './store'
 
 function sorted(core: AppCore): ProxyEndpoint[] {
   return core.store.data.proxies.slice().sort((a, b) => a.order - b.order)
 }
+
 function keyTaken(core: AppCore, key: string, exceptId?: string): boolean {
   return core.store.data.proxies.some((p) => p.key === key && p.id !== exceptId)
+}
+
+function uniqueGeneratedKey(core: AppCore, provider: 'openai' | 'anthropic'): string {
+  let key = generateProxyKey(provider)
+  while (keyTaken(core, key)) key = generateProxyKey(provider)
+  return key
+}
+
+function sameKeyGroup(proxies: ProxyEndpoint[], key: string): ProxyEndpoint[] {
+  return proxies.filter((p) => p.key.trim() === key)
+}
+
+function proxyById(core: AppCore, id: string): ProxyEndpoint {
+  const proxy = core.store.data.proxies.find((p) => p.id === id)
+  if (!proxy) throw new Error(mt('err.proxyNotFound'))
+  return proxy
 }
 
 export function registerProxyService(core: AppCore, server: ProxyServer): void {
@@ -35,14 +53,13 @@ export function registerProxyService(core: AppCore, server: ProxyServer): void {
   core.commands.register('proxies.suggestKey', ({ credentialId }) => {
     const cred = core.store.data.credentials.find((c) => c.id === credentialId)
     if (!cred) throw new Error(mt('err.authNotFound'))
-    return { key: generateProxyKey(cred.provider) }
+    return { key: uniqueGeneratedKey(core, cred.provider) }
   })
 
   core.commands.register('proxies.create', ({ credentialId, name, key }) => {
     const cred = core.store.data.credentials.find((c) => c.id === credentialId)
     if (!cred) throw new Error(mt('err.authNotFound'))
-    const finalKey = key?.trim() || generateProxyKey(cred.provider)
-    if (keyTaken(core, finalKey)) throw new Error(mt('err.keyExists'))
+    const finalKey = key?.trim() || uniqueGeneratedKey(core, cred.provider)
     const siblings = core.store.data.proxies.filter((p) => p.credentialId === credentialId)
     const order = siblings.reduce((m, p) => Math.max(m, p.order), -1) + 1
     const endpoint: ProxyEndpoint = {
@@ -56,16 +73,16 @@ export function registerProxyService(core: AppCore, server: ProxyServer): void {
       createdAt: Date.now(),
       order
     }
-    core.store.mutate((db) => db.proxies.push(endpoint))
+    core.store.mutate((db) => {
+      db.proxies.push(endpoint)
+      normalizeSameProxyKeyState(db.proxies)
+    })
     changed()
-    return endpoint
+    return proxyById(core, endpoint.id)
   })
 
   core.commands.register('proxies.update', ({ id, patch }) => {
     let updated: ProxyEndpoint | undefined
-    if (patch.key !== undefined && patch.key.trim() && keyTaken(core, patch.key.trim(), id)) {
-      throw new Error(mt('err.keyExists'))
-    }
     core.store.mutate((db) => {
       const p = db.proxies.find((x) => x.id === id)
       if (!p) return
@@ -81,11 +98,12 @@ export function registerProxyService(core: AppCore, server: ProxyServer): void {
       if (patch.limitTotalTokens !== undefined) {
         p.limitTotalTokens = patch.limitTotalTokens > 0 ? patch.limitTotalTokens : undefined
       }
+      normalizeSameProxyKeyState(db.proxies)
       updated = p
     })
     if (!updated) throw new Error(mt('err.proxyNotFound'))
     changed()
-    return updated
+    return proxyById(core, id)
   })
 
   core.commands.register('proxies.delete', ({ id }) => {
@@ -93,11 +111,49 @@ export function registerProxyService(core: AppCore, server: ProxyServer): void {
       // locate the history leaf via the entity's credentialId BEFORE the entity disappears
       const p = db.proxies.find((x) => x.id === id)
       db.proxies = db.proxies.filter((x) => x.id !== id)
+      normalizeSameProxyKeyState(db.proxies)
       // the daily ledger survives as a tombstone — the credential's total must not change here
       const leaf = p ? getProxyLeaf(db.usageHistory, p.credentialId, p.id) : undefined
       if (leaf) leaf.deleted = true
     })
     changed()
+  })
+
+  core.commands.register('proxies.setSameKeyMode', ({ id, enabled }) => {
+    core.store.mutate((db) => {
+      const proxy = db.proxies.find((p) => p.id === id)
+      if (!proxy) throw new Error(mt('err.proxyNotFound'))
+      const key = proxy.key.trim()
+      const group = sameKeyGroup(db.proxies, key)
+      if (group.length < 2) throw new Error(mt('err.proxySameKeyNotDuplicated'))
+      for (const member of group) {
+        if (enabled) {
+          member.sameKeyMode = true
+          member.sameKeyActive = member.id === id
+        } else {
+          delete member.sameKeyMode
+          delete member.sameKeyActive
+        }
+      }
+      normalizeSameProxyKeyState(db.proxies)
+    })
+    changed()
+    return proxyById(core, id)
+  })
+
+  core.commands.register('proxies.setSameKeyActive', ({ id, active }) => {
+    core.store.mutate((db) => {
+      const proxy = db.proxies.find((p) => p.id === id)
+      if (!proxy) throw new Error(mt('err.proxyNotFound'))
+      const key = proxy.key.trim()
+      const group = sameKeyGroup(db.proxies, key)
+      if (group.length < 2) throw new Error(mt('err.proxySameKeyNotDuplicated'))
+      if (!group.some((p) => p.sameKeyMode === true)) throw new Error(mt('err.proxySameKeyModeOff'))
+      for (const member of group) member.sameKeyActive = active ? member.id === id : false
+      normalizeSameProxyKeyState(db.proxies)
+    })
+    changed()
+    return proxyById(core, id)
   })
 
   core.commands.register('proxies.regenerateKey', ({ id }) => {
@@ -106,12 +162,13 @@ export function registerProxyService(core: AppCore, server: ProxyServer): void {
       const p = db.proxies.find((x) => x.id === id)
       if (!p) return
       const cred = db.credentials.find((c) => c.id === p.credentialId)
-      p.key = generateProxyKey(cred?.provider ?? 'openai')
+      p.key = uniqueGeneratedKey(core, cred?.provider ?? 'openai')
+      normalizeSameProxyKeyState(db.proxies)
       updated = p
     })
     if (!updated) throw new Error(mt('err.proxyNotFound'))
     changed()
-    return updated
+    return proxyById(core, id)
   })
 
   core.commands.register('proxies.resetUsage', ({ id }) => {

@@ -8,6 +8,16 @@ export interface OAuthAccount {
   organization?: string
 }
 
+/** Duplicate upstream API-key metadata, derived in main (the renderer never sees the raw key). */
+export interface SameApiKeyInfo {
+  duplicated: boolean
+  groupSize: number
+  /** whether this duplicate group has opted into the special same-key mode */
+  modeEnabled: boolean
+  /** within an enabled duplicate group, whether THIS credential's toggle is the active one */
+  active: boolean
+}
+
 /**
  * The renderer-facing view of a credential. NEVER carries the raw secret (API key or OAuth
  * tokens) — only a masked preview and, for OAuth, the account/expiry metadata. The secret-bearing
@@ -22,6 +32,8 @@ export interface CredentialView {
   baseUrl: string
   /** apikey only: masked preview like "sk-…AB12" */
   keyPreview?: string
+  /** apikey only: duplicate-key metadata, derived from the exact raw key in main */
+  sameApiKey?: SameApiKeyInfo
   /** oauth only */
   account?: OAuthAccount
   /** oauth only: access-token expiry (epoch ms); compared to now for the 有效/过期 badge */

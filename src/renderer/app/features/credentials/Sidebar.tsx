@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import type { Provider } from '@shared/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Reorder } from 'framer-motion'
+import type { CredentialView, Provider } from '@shared/types'
 import { useStore } from '../../store'
 import { useT } from '../../lib/i18n'
 import { api } from '../../lib/bridge'
@@ -37,6 +38,20 @@ const providerTint: Record<Provider, string> = {
   anthropic: 'bg-marker-knot/15'
 }
 
+function arraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i])
+}
+
+function mergeOrderedIds(prev: string[], next: string[]): string[] {
+  const nextSet = new Set(next)
+  const merged = prev.filter((id) => nextSet.has(id))
+  const mergedSet = new Set(merged)
+  for (const id of next) {
+    if (!mergedSet.has(id)) merged.push(id)
+  }
+  return merged
+}
+
 function Chevron({ dir }: { dir: 'left' | 'right' }): JSX.Element {
   const d = dir === 'left' ? 'M10 3 L5 8 L10 13' : 'M6 3 L11 8 L6 13'
   return (
@@ -55,6 +70,7 @@ export function Sidebar(): JSX.Element {
   const toast = useStore((s) => s.toast)
   const askPrompt = useStore((s) => s.askPrompt)
   const askConfirm = useStore((s) => s.askConfirm)
+  const reloadCredentials = useStore((s) => s.reloadCredentials)
   const t = useT()
   const [adding, setAdding] = useState(false)
   // the app-level (all credentials rolled up) usage-history dialog
@@ -62,6 +78,40 @@ export function Sidebar(): JSX.Element {
   const [menu, setMenu] = useState<CtxMenu | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   useDoodleScrollbar(listRef, 'y')
+
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [orderedIds, setOrderedIds] = useState<string[]>(() => credentials.map((c) => c.id))
+  const [pendingOrder, setPendingOrder] = useState<string[] | null>(null)
+  const orderedIdsRef = useRef(orderedIds)
+  const justDraggedId = useRef<string | null>(null)
+  const clearDraggedTimer = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    orderedIdsRef.current = orderedIds
+  }, [orderedIds])
+
+  useEffect(() => {
+    const nextIds = credentials.map((c) => c.id)
+    if (pendingOrder && arraysEqual(nextIds, pendingOrder)) {
+      setPendingOrder(null)
+      setOrderedIds(nextIds)
+      return
+    }
+    setOrderedIds((prev) => (draggingId || pendingOrder ? mergeOrderedIds(prev, nextIds) : nextIds))
+  }, [credentials, draggingId, pendingOrder])
+
+  useEffect(
+    () => () => {
+      if (clearDraggedTimer.current) window.clearTimeout(clearDraggedTimer.current)
+    },
+    []
+  )
+
+  const credentialById = useMemo(() => new Map(credentials.map((c) => [c.id, c] as const)), [credentials])
+  const orderedCredentials = useMemo(
+    () => orderedIds.map((id) => credentialById.get(id)).filter((c): c is CredentialView => !!c),
+    [credentialById, orderedIds]
+  )
 
   // Width is spring-driven by direct DOM mutation; React only re-renders on collapse toggle.
   // NOTE: only style.width is ever animated — never a transform — because the context menu and
@@ -133,6 +183,35 @@ export function Sidebar(): JSX.Element {
     e.stopPropagation()
     select(id)
     setMenu({ id, name, x: e.clientX, y: e.clientY })
+  }
+
+  const markJustDragged = (id: string): void => {
+    justDraggedId.current = id
+    if (clearDraggedTimer.current) window.clearTimeout(clearDraggedTimer.current)
+    clearDraggedTimer.current = window.setTimeout(() => {
+      if (justDraggedId.current === id) justDraggedId.current = null
+    }, 0)
+  }
+
+  const handleSelect = (id: string): void => {
+    if (justDraggedId.current === id) return
+    select(id)
+  }
+
+  const persistOrder = async (ids: string[]): Promise<void> => {
+    const currentIds = credentials.map((c) => c.id)
+    if (arraysEqual(ids, currentIds)) {
+      setPendingOrder(null)
+      return
+    }
+    setPendingOrder(ids)
+    try {
+      await api.command('credentials.reorder', { orderedIds: ids })
+    } catch (e) {
+      setPendingOrder(null)
+      toast('error', e instanceof Error ? e.message : String(e))
+      void reloadCredentials()
+    }
   }
 
   const doTest = async (id: string): Promise<void> => {
@@ -216,7 +295,7 @@ export function Sidebar(): JSX.Element {
 
       <div
         ref={listRef}
-        className={`relative min-h-0 flex-1 space-y-2 overflow-y-auto pb-4 ${
+        className={`relative min-h-0 flex-1 overflow-y-auto pb-4 ${
           // pt-1 keeps the first mini-square's overhanging status dot inside the scroll clip box
           collapsed ? 'px-2 pt-1' : 'px-3'
         }`}
@@ -226,55 +305,81 @@ export function Sidebar(): JSX.Element {
             {t('sidebar.empty')}
           </div>
         )}
-        {credentials.map((c) => {
-          const count = proxies.filter((p) => p.credentialId === c.id).length
-          const active = c.id === selectedId
-          if (collapsed) {
+
+        <Reorder.Group
+          axis="y"
+          layoutScroll
+          values={orderedIds}
+          onReorder={setOrderedIds}
+          className={`relative flex min-h-0 flex-col gap-2 ${collapsed ? '' : ''}`}
+        >
+          {orderedCredentials.map((c) => {
+            const count = proxies.filter((p) => p.credentialId === c.id).length
+            const active = c.id === selectedId
+            const dragging = draggingId === c.id
             return (
-              <button
+              <Reorder.Item
                 key={c.id}
-                onClick={() => select(c.id)}
-                onContextMenu={(e) => openMenu(e, c.id, c.name)}
-                title={c.name}
-                className={`doodle-edge relative mx-auto flex h-10 w-10 items-center justify-center rounded-[12px] border-2 font-doodle text-base font-bold transition ${
-                  active
-                    ? 'border-marker-knot bg-marker-knot/10'
-                    : `border-ink/25 hover:border-ink/60 ${providerTint[c.provider]}`
-                } ${c.enabled ? '' : 'opacity-55'}`}
+                value={c.id}
+                onDragStart={() => {
+                  setDraggingId(c.id)
+                  setMenu(null)
+                }}
+                onDragEnd={() => {
+                  const next = [...orderedIdsRef.current]
+                  markJustDragged(c.id)
+                  setDraggingId(null)
+                  void persistOrder(next)
+                }}
+                whileDrag={{ scale: 1.03, boxShadow: '0 14px 28px rgba(43,43,43,.18)' }}
+                transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                style={{ zIndex: dragging ? 88 : 0 }}
+                className="list-none"
               >
-                {/* first character stands in for the name; spread handles astral glyphs/emoji */}
-                {[...c.name.trim()][0] ?? '·'}
-                <span className="absolute -right-1 -top-1 flex">
-                  <StatusDot ok={c.lastTest?.ok} />
-                </span>
-              </button>
+                {collapsed ? (
+                  <button
+                    onClick={() => handleSelect(c.id)}
+                    onContextMenu={(e) => openMenu(e, c.id, c.name)}
+                    title={c.name}
+                    className={`doodle-edge relative mx-auto flex h-10 w-10 cursor-grab items-center justify-center rounded-[12px] border-2 font-doodle text-base font-bold transition active:cursor-grabbing ${
+                      active
+                        ? 'border-marker-knot bg-marker-knot/10'
+                        : `border-ink/25 hover:border-ink/60 ${providerTint[c.provider]}`
+                    } ${c.enabled ? '' : 'opacity-55'} ${dragging ? 'border-ink bg-card shadow-lg' : ''}`}
+                  >
+                    {/* first character stands in for the name; spread handles astral glyphs/emoji */}
+                    {[...c.name.trim()][0] ?? '·'}
+                    <span className="absolute -right-1 -top-1 flex">
+                      <StatusDot ok={c.lastTest?.ok} />
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSelect(c.id)}
+                    onContextMenu={(e) => openMenu(e, c.id, c.name)}
+                    className={`doodle-edge block w-full cursor-grab rounded-[12px] border-2 px-3 py-2.5 text-left font-doodle transition active:cursor-grabbing ${
+                      active
+                        ? 'border-marker-knot bg-marker-knot/10'
+                        : 'border-ink/30 bg-card/60 hover:border-ink/60'
+                    } ${c.enabled ? '' : 'opacity-55'} ${dragging ? 'border-ink bg-paper shadow-lg' : ''}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <StatusDot ok={c.lastTest?.ok} />
+                      <span className="flex-1 truncate text-base font-bold">{c.name}</span>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <ProviderBadge provider={c.provider} />
+                      <KindBadge kind={c.kind} />
+                      <span className="ml-auto text-xs opacity-55">
+                        {c.enabled ? t('sidebar.apiCount', { n: count }) : t('sidebar.disabled')}
+                      </span>
+                    </div>
+                  </button>
+                )}
+              </Reorder.Item>
             )
-          }
-          return (
-            <button
-              key={c.id}
-              onClick={() => select(c.id)}
-              onContextMenu={(e) => openMenu(e, c.id, c.name)}
-              className={`doodle-edge block w-full rounded-[12px] border-2 px-3 py-2.5 text-left font-doodle transition ${
-                active
-                  ? 'border-marker-knot bg-marker-knot/10'
-                  : 'border-ink/30 bg-card/60 hover:border-ink/60'
-              } ${c.enabled ? '' : 'opacity-55'}`}
-            >
-              <div className="flex items-center gap-2">
-                <StatusDot ok={c.lastTest?.ok} />
-                <span className="flex-1 truncate text-base font-bold">{c.name}</span>
-              </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <ProviderBadge provider={c.provider} />
-                <KindBadge kind={c.kind} />
-                <span className="ml-auto text-xs opacity-55">
-                  {c.enabled ? t('sidebar.apiCount', { n: count }) : t('sidebar.disabled')}
-                </span>
-              </div>
-            </button>
-          )
-        })}
+          })}
+        </Reorder.Group>
       </div>
 
       {/* width drag handle — a wide invisible hit zone straddling the right border, with a small

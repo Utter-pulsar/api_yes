@@ -89,6 +89,8 @@ export type CommandMap = {
   }
   'credentials.delete': { input: { id: Id }; result: void }
   'credentials.reorder': { input: { orderedIds: Id[] }; result: void }
+  'credentials.setSameApiKeyMode': { input: { id: Id; enabled: boolean }; result: CredentialView }
+  'credentials.setSameApiKeyActive': { input: { id: Id; active: boolean }; result: CredentialView }
   /** test an EXISTING credential's upstream auth */
   'credentials.test': { input: { id: Id }; result: TestResult }
   /** test a not-yet-saved API-key draft, before adding */
@@ -119,6 +121,8 @@ export type CommandMap = {
     result: ProxyEndpoint
   }
   'proxies.delete': { input: { id: Id }; result: void }
+  'proxies.setSameKeyMode': { input: { id: Id; enabled: boolean }; result: ProxyEndpoint }
+  'proxies.setSameKeyActive': { input: { id: Id; active: boolean }; result: ProxyEndpoint }
   'proxies.regenerateKey': { input: { id: Id }; result: ProxyEndpoint }
   'proxies.resetUsage': { input: { id: Id }; result: ProxyEndpoint }
   /** generate a fresh provider-styled key WITHOUT saving (for the create form's "骰子") */

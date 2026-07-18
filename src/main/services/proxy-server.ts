@@ -171,8 +171,10 @@ export class ProxyServer {
     const key = extractKey(req)
     if (!key) return this.fail(res, 401, mt('proxy.missingKey'))
 
-    const endpoint = this.core.store.data.proxies.find((p) => p.key === key)
-    if (!endpoint) return this.fail(res, 401, mt('proxy.invalidKey'))
+    const endpoints = this.core.store.data.proxies.filter((p) => p.key === key)
+    if (endpoints.length === 0) return this.fail(res, 401, mt('proxy.invalidKey'))
+    const endpoint =
+      endpoints.find((p) => p.sameKeyMode === true && p.sameKeyActive === true) ?? endpoints[0]
     if (!endpoint.enabled) return this.fail(res, 403, mt('proxy.keyDisabled'))
     const cred = this.core.store.data.credentials.find((c) => c.id === endpoint.credentialId)
     if (!cred) return this.fail(res, 502, mt('proxy.credGone'))

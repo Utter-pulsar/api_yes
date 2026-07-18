@@ -137,6 +137,10 @@ const DICT: Record<string, Entry> = {
   'add.cancelAuth': { zh: '取消本次授权', en: 'Cancel this authorization' },
   'add.added': { zh: '已添加凭证', en: 'Credential added' },
   'add.authSuccess': { zh: '授权成功', en: 'Authorized' },
+  'add.sameKeyConfirm': {
+    zh: '检测到这个 API Key 和另外 {n} 个凭证完全一样。要开启“相同 API Key 模式”吗？',
+    en: 'This API key exactly matches {n} other credential(s). Enable same API key mode?'
+  },
 
   // ── credential detail ──
   'detail.emptyPick': { zh: '从左边选一个授权，或先添加一个', en: 'Pick a credential on the left, or add one' },
@@ -160,6 +164,19 @@ const DICT: Record<string, Entry> = {
   'detail.delete': { zh: '🗑 删除', en: '🗑 Delete' },
   'detail.deleteConfirm': { zh: '删除「{n}」？其下所有 API 也会一起删除', en: 'Delete "{n}"? All its APIs will be removed too' },
   'detail.deleted': { zh: '已删除', en: 'Deleted' },
+  'detail.sameKeyPromptBanner': {
+    zh: '这个凭证和另外 {n} 个凭证使用完全相同的上游 API Key。可以开启“相同 API Key 模式”来管理谁处于激活状态。',
+    en: 'This credential shares the exact same upstream API key with {n} other credential(s). Enable same API key mode to choose which one is active.'
+  },
+  'detail.sameKeyEnableCta': { zh: '开启相同 API Key 模式', en: 'Enable same API key mode' },
+  'detail.sameKeyModeEnabled': { zh: '已开启相同 API Key 模式', en: 'Same API key mode enabled' },
+  'detail.sameKeyToggle': { zh: '相同 API Key 激活开关', en: 'Same API key active switch' },
+  'detail.sameKeyActive': { zh: '当前激活', en: 'Currently active' },
+  'detail.sameKeyInactive': { zh: '当前未激活', en: 'Currently inactive' },
+  'detail.sameKeyHint': {
+    zh: '这个上游 API Key 共有 {n} 个重复凭证；{state}。打开当前开关时，其他重复项会自动关闭。',
+    en: 'This upstream API key is shared by {n} credentials; {state}. Turning this switch on automatically turns the duplicate peers off.'
+  },
 
   // ── edit credential ──
   'edit.title': { zh: '编辑凭证', en: 'Edit credential' },
@@ -170,6 +187,10 @@ const DICT: Record<string, Entry> = {
   'edit.keyPlaceholder': { zh: '留空表示不修改', en: 'Leave blank to keep current' },
   'edit.testNewKey': { zh: '测试新 Key', en: 'Test new key' },
   'edit.saved': { zh: '已保存', en: 'Saved' },
+  'edit.sameKeyConfirm': {
+    zh: '修改后发现这个 API Key 和另外 {n} 个凭证完全一样。要开启“相同 API Key 模式”吗？',
+    en: 'After saving, this API key exactly matches {n} other credential(s). Enable same API key mode?'
+  },
 
   // ── model list ──
   'models.title': { zh: '模型列表', en: 'Models' },
@@ -286,6 +307,27 @@ const DICT: Record<string, Entry> = {
   'api.regen': { zh: '重新生成', en: 'Regenerate' },
   'api.resetUsage': { zh: '清零用量', en: 'Reset usage' },
   'api.delete': { zh: '删除', en: 'Delete' },
+  'api.expandAll': { zh: '全部展开', en: 'Expand all' },
+  'api.collapseAll': { zh: '全部折叠', en: 'Collapse all' },
+  'api.cardExpand': { zh: '展开这个 API', en: 'Expand this API' },
+  'api.cardCollapse': { zh: '折叠这个 API', en: 'Collapse this API' },
+  'api.sameKeyConfirm': {
+    zh: '检测到这个 API 和另外 {n} 个 API 的 Key 完全一样。要开启“相同 API Key 模式”吗？',
+    en: 'This API key exactly matches {n} other API(s). Enable same API key mode?'
+  },
+  'api.sameKeyPromptBanner': {
+    zh: '这个 API 和另外 {n} 个 API 使用完全相同的本地 Key。可以开启“相同 API Key 模式”来决定实际生效的是哪一个。',
+    en: 'This API shares the exact same local key with {n} other API(s). Enable same API key mode to decide which one is actually active.'
+  },
+  'api.sameKeyEnableCta': { zh: '开启相同 API Key 模式', en: 'Enable same API key mode' },
+  'api.sameKeyModeEnabled': { zh: '已开启 API 的相同 Key 模式', en: 'Same API key mode enabled' },
+  'api.sameKeyToggle': { zh: '相同 Key 激活开关', en: 'Same-key active switch' },
+  'api.sameKeyActive': { zh: '当前激活', en: 'Currently active' },
+  'api.sameKeyInactive': { zh: '当前未激活', en: 'Currently inactive' },
+  'api.sameKeyHint': {
+    zh: '这个本地 Key 共有 {n} 个重复 API；{state}。打开当前开关时，其他重复 API 会自动关闭。',
+    en: 'This local key is shared by {n} APIs; {state}. Turning this switch on automatically turns the duplicate APIs off.'
+  },
 
   // ── context menu ──
   'ctx.rename': { zh: '重命名', en: 'Rename' },

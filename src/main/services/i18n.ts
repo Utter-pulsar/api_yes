@@ -57,6 +57,10 @@ const DICT: Record<string, Entry> = {
   'err.authNotFound': { zh: '授权不存在', en: 'Credential not found' },
   'err.keyExists': { zh: '该 Key 已存在，请换一个', en: 'That key already exists; choose another' },
   'err.proxyNotFound': { zh: 'API Key 不存在', en: 'API key not found' },
+  'err.sameKeyNotDuplicated': { zh: '当前 API Key 没有与其他凭证重复', en: 'This API key is not duplicated with any other credential' },
+  'err.sameKeyModeOff': { zh: '相同 API Key 模式尚未开启', en: 'Same API key mode is not enabled' },
+  'err.proxySameKeyNotDuplicated': { zh: '当前这个 API Key 没有和别的 API 重复', en: 'This API key is not duplicated with any other API' },
+  'err.proxySameKeyModeOff': { zh: '这个 API Key 的相同 Key 模式尚未开启', en: 'Same-key mode is not enabled for this API key' },
 
   // ── proxy server (runtime) ──
   'proxy.portTaken': { zh: '端口 {port} 已被占用', en: 'Port {port} is already in use' },
@@ -104,7 +108,7 @@ export function mt(key: string, vars?: Record<string, string | number>): string 
   const entry = DICT[key]
   let s = entry ? entry[current] : key
   if (vars) {
-    for (const k of Object.keys(vars)) s = s.replace(new RegExp(`\\{${k}\\}`, 'g'), String(vars[k]))
+    for (const k of Object.keys(vars)) s = s.replace(new RegExp(`\{${k}\}`, 'g'), String(vars[k]))
   }
   return s
 }

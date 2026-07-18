@@ -1,16 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import type { CredentialView } from '@shared/types'
 import type { AppCore } from './context'
-import { toCredentialView, type StoredCredential } from './store'
 import { getCredentialNode } from './usage-history'
+import {
+  getSameApiKeyInfo,
+  normalizeSameApiKeyState,
+  toCredentialView,
+  type StoredCredential
+} from './store'
 import { fetchUsage, listModels, testCredential } from './provider/upstream'
 import { mt } from './i18n'
 
 function views(core: AppCore): CredentialView[] {
-  return core.store.data.credentials
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .map(toCredentialView)
+  const credentials = core.store.data.credentials.slice().sort((a, b) => a.order - b.order)
+  return credentials.map((c) => toCredentialView(c, credentials))
 }
 
 function broadcastCredentials(core: AppCore): void {
@@ -26,12 +29,19 @@ function broadcastProxies(core: AppCore): void {
   )
 }
 
+function sameApiKeyView(core: AppCore, id: string): CredentialView {
+  const credentials = core.store.data.credentials.slice().sort((a, b) => a.order - b.order)
+  const c = credentials.find((x) => x.id === id)
+  if (!c) throw new Error(mt('err.credNotFound'))
+  return toCredentialView(c, credentials)
+}
+
 /** Registers all credential query/command handlers. The OAuth-creation path lives in oauth-service. */
 export function registerCredentialService(core: AppCore): void {
   core.queries.register('credentials.list', () => views(core))
   core.queries.register('credentials.get', ({ id }) => {
     const c = core.store.data.credentials.find((x) => x.id === id)
-    return c ? toCredentialView(c) : null
+    return c ? toCredentialView(c, core.store.data.credentials) : null
   })
 
   core.commands.register('credentials.createApiKey', (input) => {
@@ -49,9 +59,12 @@ export function registerCredentialService(core: AppCore): void {
       updatedAt: now,
       order
     }
-    core.store.mutate((db) => db.credentials.push(cred))
+    core.store.mutate((db) => {
+      db.credentials.push(cred)
+      normalizeSameApiKeyState(db.credentials)
+    })
     broadcastCredentials(core)
-    return toCredentialView(cred)
+    return sameApiKeyView(core, cred.id)
   })
 
   core.commands.register('credentials.update', ({ id, patch }) => {
@@ -70,16 +83,58 @@ export function registerCredentialService(core: AppCore): void {
       if (patch.enabled !== undefined) c.enabled = patch.enabled
       c.updatedAt = Date.now()
       updated = c
+      normalizeSameApiKeyState(db.credentials)
     })
     if (!updated) throw new Error(mt('err.credNotFound'))
     broadcastCredentials(core)
-    return toCredentialView(updated)
+    return sameApiKeyView(core, id)
+  })
+
+  core.commands.register('credentials.setSameApiKeyMode', ({ id, enabled }) => {
+    core.store.mutate((db) => {
+      const c = db.credentials.find((x) => x.id === id)
+      if (!c) throw new Error(mt('err.credNotFound'))
+      const info = getSameApiKeyInfo(c, db.credentials)
+      if (!info?.duplicated) throw new Error(mt('err.sameKeyNotDuplicated'))
+      const key = c.apiKey?.trim()
+      if (!key) throw new Error(mt('err.sameKeyNotDuplicated'))
+      const group = db.credentials.filter((x) => x.kind === 'apikey' && x.apiKey?.trim() === key)
+      for (const member of group) {
+        if (enabled) {
+          member.sameApiKeyMode = true
+          member.sameApiKeyActive = member.id === id
+        } else {
+          delete member.sameApiKeyMode
+          delete member.sameApiKeyActive
+        }
+      }
+      normalizeSameApiKeyState(db.credentials)
+    })
+    broadcastCredentials(core)
+    return sameApiKeyView(core, id)
+  })
+
+  core.commands.register('credentials.setSameApiKeyActive', ({ id, active }) => {
+    core.store.mutate((db) => {
+      const c = db.credentials.find((x) => x.id === id)
+      if (!c) throw new Error(mt('err.credNotFound'))
+      const info = getSameApiKeyInfo(c, db.credentials)
+      if (!info?.duplicated || !info.modeEnabled) throw new Error(mt('err.sameKeyModeOff'))
+      const key = c.apiKey?.trim()
+      if (!key) throw new Error(mt('err.sameKeyModeOff'))
+      const group = db.credentials.filter((x) => x.kind === 'apikey' && x.apiKey?.trim() === key)
+      for (const member of group) member.sameApiKeyActive = active ? member.id === id : false
+      normalizeSameApiKeyState(db.credentials)
+    })
+    broadcastCredentials(core)
+    return sameApiKeyView(core, id)
   })
 
   core.commands.register('credentials.delete', ({ id }) => {
     let removedProxies = false
     core.store.mutate((db) => {
       db.credentials = db.credentials.filter((c) => c.id !== id)
+      normalizeSameApiKeyState(db.credentials)
       const gone = db.proxies.filter((p) => p.credentialId === id)
       db.proxies = db.proxies.filter((p) => p.credentialId !== id)
       removedProxies = gone.length > 0
@@ -101,6 +156,7 @@ export function registerCredentialService(core: AppCore): void {
         const c = db.credentials.find((x) => x.id === id)
         if (c) c.order = i
       })
+      normalizeSameApiKeyState(db.credentials)
     })
     broadcastCredentials(core)
   })
