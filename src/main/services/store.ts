@@ -11,7 +11,12 @@ import type {
   UsageHistoryStore,
   UsageHistoryTree
 } from '@shared/types'
-import { DEFAULT_SETTINGS, emptyUsageHistoryTree } from '@shared/types'
+import {
+  DEFAULT_CODEX_MODELS,
+  DEFAULT_SETTINGS,
+  LEGACY_CODEX_MODEL_DEFAULTS,
+  emptyUsageHistoryTree
+} from '@shared/types'
 import { migrateLegacyHistory, reconcileHistoryWithCounters } from './usage-history'
 import type { TestResult } from '@shared/types/common'
 import type { Provider, CredentialKind, Id } from '@shared/types/common'
@@ -84,11 +89,27 @@ interface PersistedDB {
 function emptyDb(): Database {
   return {
     version: SCHEMA_VERSION,
-    settings: { ...DEFAULT_SETTINGS },
+    settings: normalizeSettings(undefined),
     credentials: [],
     proxies: [],
     usageHistory: emptyUsageHistoryTree()
   }
+}
+
+function sameStringList(a: readonly string[] | undefined, b: readonly string[]): boolean {
+  return Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i])
+}
+
+/** Existing installs that never touched the Codex model list should follow the shipped default as
+ *  Codex moves forward; explicit user-curated lists stay untouched. */
+function normalizeSettings(raw: Partial<AppSettings> | undefined): AppSettings {
+  const settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) }
+  const rawModels = raw?.codexModels
+  const isLegacyDefault = LEGACY_CODEX_MODEL_DEFAULTS.some((legacy) => sameStringList(rawModels, legacy))
+  if (!Array.isArray(rawModels) || rawModels.length === 0 || isLegacyDefault) {
+    settings.codexModels = [...DEFAULT_CODEX_MODELS]
+  }
+  return settings
 }
 
 // ---- secret (de)serialization ----
@@ -336,7 +357,7 @@ export class Store {
     }
     return {
       version: raw.version ?? SCHEMA_VERSION,
-      settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
+      settings: normalizeSettings(raw.settings),
       credentials,
       proxies,
       usageHistory

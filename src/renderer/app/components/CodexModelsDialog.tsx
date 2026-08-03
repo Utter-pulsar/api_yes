@@ -9,7 +9,7 @@ import { DoodleButton } from './doodle/DoodleButton'
 /**
  * User-curated Codex (ChatGPT subscription) model list — there's no public list endpoint, so the
  * models are maintained by hand here. Order matters (the connectivity probe walks top-to-bottom,
- * cheapest first), hence the explicit ↑/↓ reordering. Every mutation persists immediately.
+ * defaults follow Codex priority), hence the explicit ↑/↓ reordering. Every mutation persists immediately.
  */
 export function CodexModelsDialog({
   open,

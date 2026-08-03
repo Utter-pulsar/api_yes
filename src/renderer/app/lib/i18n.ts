@@ -86,8 +86,8 @@ const DICT: Record<string, Entry> = {
   // ── Codex model checklist (hamburger menu → editable list) ──
   'cm.title': { zh: 'Codex 模型列表', en: 'Codex models' },
   'cm.hint': {
-    zh: 'ChatGPT 订阅（Codex）没有公开的模型列表接口，只能在这里手动维护。顺序有讲究：测试连接会从上到下逐个探测，请把便宜的模型放在最前面。',
-    en: 'The Codex (ChatGPT subscription) backend has no public model-list endpoint, so this list is maintained by hand. Order matters: connectivity tests probe top-to-bottom — keep the cheapest model first.'
+    zh: 'ChatGPT 订阅（Codex）没有公开的模型列表接口，只能在这里手动维护。顺序有讲究：测试连接会从上到下逐个探测，默认按 Codex 当前模型优先级排列。',
+    en: 'The Codex (ChatGPT subscription) backend has no public model-list endpoint, so this list is maintained by hand. Order matters: connectivity tests probe top-to-bottom; defaults follow Codex’s current model priority.'
   },
   'cm.add': { zh: '＋ 添加模型', en: '＋ Add model' },
   'cm.addPrompt': { zh: '输入模型 ID', en: 'Model id' },

@@ -395,7 +395,7 @@ export class ProxyServer {
       return this.fail(res, 400, mt('proxy.badJson'), 'openai')
     }
     const wantStream = chat.stream === true
-    // no model in the request → first entry of the curated list (cheapest-first, never empty)
+    // no model in the request → first entry of the curated list (Codex-priority order, never empty)
     const model = typeof chat.model === 'string' ? chat.model : codexModels(this.core)[0]
 
     let token: string

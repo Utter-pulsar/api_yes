@@ -11,8 +11,8 @@ import { mt, listJoin } from '../i18n'
 
 /**
  * The Codex-on-ChatGPT model list: user-curated in settings (there's no public list endpoint —
- * as of 2026-06 e.g. gpt-5 / gpt-5.2-codex are rejected for ChatGPT accounts), ordered
- * cheapest-first for the connectivity probes. Empty/missing falls back to the shipped defaults so
+ * as of 2026-08 Codex has moved to the gpt-5.6 default family), ordered by Codex priority for
+ * the connectivity probes. Empty/missing falls back to the shipped defaults so
  * probes are never vacuous. Read at call time; NEVER mutate the returned array.
  */
 export function codexModels(core: AppCore): string[] {
