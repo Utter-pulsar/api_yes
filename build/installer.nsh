@@ -12,7 +12,7 @@
   FileWrite $0 'chcp 65001 >nul$\r$\n'
   FileWrite $0 'set "APIYES_ENV=prod"$\r$\n'
   FileWrite $0 'set "ELECTRON_RUN_AS_NODE=1"$\r$\n'
-  FileWrite $0 '"%~dp0..\${APP_EXECUTABLE_FILENAME}" "%~dp0..\resources\app.asar\out\main\cli.js" --env prod %*$\r$\n'
+  FileWrite $0 'start "" /b /wait "%~dp0..\${APP_EXECUTABLE_FILENAME}" "%~dp0..\resources\app.asar\out\main\cli.js" --env prod %*$\r$\n'
   FileWrite $0 'set "_APIYES_EXIT=%ERRORLEVEL%"$\r$\n'
   FileWrite $0 'if defined _APIYES_OLD_CP chcp %_APIYES_OLD_CP% >nul$\r$\n'
   FileWrite $0 'exit /b %_APIYES_EXIT%$\r$\n'
