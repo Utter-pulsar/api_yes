@@ -4,7 +4,7 @@ import type { CredentialView, ProxyEndpoint, ProxyServerStatus } from '@shared/t
 import { api } from '../../lib/bridge'
 import { useStore } from '../../store'
 import { useT } from '../../lib/i18n'
-import { compact, grouped, ago } from '../../lib/format'
+import { compact, grouped, ago, parseCompactAmount } from '../../lib/format'
 import { DoodleButton } from '../../components/doodle/DoodleButton'
 import { DoodleToggle } from '../../components/doodle/DoodleToggle'
 import { UsageHistoryDialog } from '../usage/UsageHistoryDialog'
@@ -413,12 +413,16 @@ function ProxyCard({
     await api.command('proxies.resetUsage', { id: proxy.id })
   }
   const setLimit = async (): Promise<void> => {
-    const cur = proxy.limitTotalTokens ? String(proxy.limitTotalTokens) : ''
+    const cur = proxy.limitTotalTokens ? compact(proxy.limitTotalTokens) : ''
     const v = await askPrompt(t('api.limitPrompt'), cur)
     if (v === null) return
-    const n = Math.max(0, Math.floor(Number(v.replace(/[^0-9]/g, '')) || 0))
+    const n = parseCompactAmount(v)
+    if (n === undefined) {
+      toast('error', t('api.limitInvalid'))
+      return
+    }
     await api.command('proxies.update', { id: proxy.id, patch: { limitTotalTokens: n } })
-    toast('success', n ? t('api.limitSet', { n: n.toLocaleString('en-US') }) : t('api.limitCleared'))
+    toast('success', n ? t('api.limitSet', { n: compact(n) }) : t('api.limitCleared'))
   }
   const remove = async (): Promise<void> => {
     if (!(await askConfirm(t('api.deleteConfirm', { n: proxy.name })))) return
@@ -555,7 +559,7 @@ function ProxyCard({
 
           {/* usage meters */}
           <div className="grid grid-cols-4 gap-2 text-center">
-            <Meter label={t('api.mReq')} value={grouped(u.requests)} />
+            <Meter label={t('api.mReq')} value={compact(u.requests)} title={t('api.mTokensTitle', { t: grouped(u.requests) })} />
             <Meter label={t('api.mIn')} value={compact(u.inputTokens)} title={t('api.mInTitle', { t: grouped(u.inputTokens), c: grouped(u.cachedTokens) })} />
             <Meter label={t('api.mOut')} value={compact(u.outputTokens)} title={t('api.mTokensTitle', { t: grouped(u.outputTokens) })} />
             <Meter label={t('api.mReason')} value={compact(u.reasoningTokens)} title={t('api.mTokensTitle', { t: grouped(u.reasoningTokens) })} />

@@ -111,6 +111,68 @@ sudo apt install -y ./API-YES_*_amd64.deb
 sudo chmod 4755 /opt/API-YES/chrome-sandbox
 ```
 
+## 配置 CLI 命令 / 环境变量
+
+API YES 也带一个本地 CLI。安装版命令是 `apiyes`，本仓库开发版命令是 `apiyesdev`。它只是本机控制器：只会连接同一台电脑上已经运行的 API YES。若你在设置里开启了管理密码，CLI 进入 TUI 或执行受保护命令前也会要求输入这个密码。
+
+### 开发环境 shell
+
+开发命令是生成出来的，不提交进仓库。执行过 `npm run build` 之后运行：
+
+```bash
+npm run setenv
+```
+
+然后按你正在用的终端激活：
+
+```powershell
+# PowerShell
+. .\.apiyes-dev-bin\activate.ps1
+```
+
+```cmd
+:: cmd.exe
+.\.apiyes-dev-bin\activate.cmd
+```
+
+```bash
+# bash / zsh / Git Bash
+. ./.apiyes-dev-bin/activate.sh
+```
+
+之后就可以运行：
+
+```bash
+apiyesdev
+```
+
+`.apiyes-dev-bin/` 会被刻意忽略，它只是本机开发便利目录。下次从仓库重新 clone 后照样可以测试：先运行 `npm run build`，再运行 `npm run setenv` 即可重新生成。
+
+### 安装版
+
+- **Windows（NSIS 安装器）** —— 安装器会显示安装范围（**仅当前用户** / **所有用户**）和安装位置页面。它会在安装目录的 `cli` 文件夹下创建 `apiyes`，并把这个文件夹写入对应 PATH：仅当前用户安装写入用户 PATH，所有用户安装写入系统 PATH。安装后请打开一个新的终端再运行。
+- **Linux（deb）** —— 安装 `.deb` 会自动创建 `/usr/bin/apiyes`，并指向 `/opt/API-YES` 里的应用。
+- **Linux（AppImage）** —— AppImage 不会安装全局命令，也不会修改 PATH。如果你需要 `apiyes` 命令，建议安装 `.deb` 包。
+- **macOS** —— 未签名的 `.dmg` / `.zip` 不会自动修改 shell PATH。把 `API-YES.app` 放进 `/Applications` 后，可以手动创建 wrapper：
+
+  ```bash
+  mkdir -p ~/.local/bin
+  cat > ~/.local/bin/apiyes <<'EOF'
+  #!/usr/bin/env sh
+  export APIYES_ENV=prod
+  export ELECTRON_RUN_AS_NODE=1
+  exec /Applications/API-YES.app/Contents/MacOS/API-YES /Applications/API-YES.app/Contents/Resources/app.asar/out/main/cli.js --env prod "$@"
+  EOF
+  chmod +x ~/.local/bin/apiyes
+  ```
+
+  确认 `~/.local/bin` 已经在你的 shell PATH 里。zsh 可以这样加：
+
+  ```bash
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+  exec zsh
+  ```
+
 ## 技术栈
 
 Electron · electron-vite · React 19 · Zustand · Tailwind CSS · framer-motion · Rough.js · TypeScript。

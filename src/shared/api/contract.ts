@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  ManagementAuthStatus,
   CredentialView,
   Id,
   ModelInfo,
@@ -24,6 +25,7 @@ import type {
 export type QueryMap = {
   'app.info': { input: void; result: { name: string; version: string; author: string } }
   'settings.get': { input: void; result: AppSettings }
+  'managementAuth.status': { input: void; result: ManagementAuthStatus }
   'window.isMaximized': { input: void; result: boolean }
 
   'credentials.list': { input: void; result: CredentialView[] }
@@ -77,6 +79,13 @@ export type CommandMap = {
 
   // ---- settings ----
   'settings.update': { input: { patch: Partial<AppSettings> }; result: AppSettings }
+
+  // ---- management password ----
+  'managementAuth.enable': { input: { password: string; lockTimeoutMs: number | null }; result: ManagementAuthStatus }
+  'managementAuth.disable': { input: { password: string }; result: ManagementAuthStatus }
+  'managementAuth.verify': { input: { password: string }; result: { ok: boolean } }
+  'managementAuth.updateLockTimeout': { input: { lockTimeoutMs: number | null }; result: ManagementAuthStatus }
+  'managementAuth.resetByDeletingAllCredentials': { input: void; result: ManagementAuthStatus }
 
   // ---- self-update ----
   'update.check': { input: void; result: void }

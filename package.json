@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
+    "cli:dev": "node out/main/cli.js --env dev",
+    "setenv": "node scripts/set-dev-cli-env.cjs",
     "build": "electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",

@@ -68,6 +68,40 @@ const DICT: Record<string, Entry> = {
   'settings.launchAtLogin': { zh: '开机自动启动', en: 'Launch at login' },
   'settings.launchAtLoginHint': { zh: '开机时自动在后台启动 API-YES', en: 'Start API-YES in the background at login' },
   'settings.language': { zh: '语言', en: 'Language' },
+  'settings.managementPassword': { zh: '管理密码', en: 'Management password' },
+  'settings.managementPasswordHint': {
+    zh: '保护界面操作，并为之后的 CLI 管理授权做准备',
+    en: 'Protects UI actions and prepares authorization for the CLI manager'
+  },
+  'settings.passwordOffHint': { zh: '关闭状态下不会自动锁定，也不会要求 CLI 登录。', en: 'When off, the app will not auto-lock or require CLI login.' },
+  'settings.newPassword': { zh: '新管理密码', en: 'New management password' },
+  'settings.repeatPassword': { zh: '重复输入密码', en: 'Repeat password' },
+  'settings.currentPassword': { zh: '当前管理密码', en: 'Current management password' },
+  'settings.enablePassword': { zh: '开启管理密码', en: 'Enable password' },
+  'settings.disablePassword': { zh: '关闭管理密码', en: 'Disable password' },
+  'settings.confirmDisablePassword': { zh: '确认关闭', en: 'Confirm disable' },
+  'settings.disablePasswordHint': { zh: '输入当前密码才能关闭管理密码', en: 'Enter the current password to disable management password' },
+  'settings.forgotPassword': { zh: '忘记密码？', en: 'Forgot password?' },
+  'settings.forgotPasswordLong': { zh: '忘记密码：删除所有授权/凭证并关闭密码', en: 'Forgot password: delete all credentials and disable password' },
+  'settings.passwordResetConfirm': {
+    zh: '这会删除所有授权/凭证、所有 API 和用量历史，并关闭管理密码。此操作无法恢复，确定继续？',
+    en: 'This deletes all credentials, APIs, and usage history, then disables the management password. This cannot be undone. Continue?'
+  },
+  'settings.passwordResetDone': { zh: '已删除所有授权/凭证并关闭管理密码', en: 'All credentials were deleted and the management password is disabled' },
+  'settings.passwordEnabled': { zh: '已开启管理密码', en: 'Management password enabled' },
+  'settings.passwordDisabled': { zh: '已关闭管理密码', en: 'Management password disabled' },
+  'settings.passwordMismatch': { zh: '两次输入的密码不一致', en: 'The two passwords do not match' },
+  'settings.passwordTooShort': { zh: '密码至少需要 4 个字符', en: 'Password must be at least 4 characters' },
+  'settings.lockTime': { zh: '自动锁定时间', en: 'Auto-lock time' },
+  'settings.lockTimeHint': { zh: '可填 30s、5m、10分钟；填“永久”表示不自动锁定', en: 'Use 30s, 5m, 10 minutes; use “never” to disable auto-lock' },
+  'settings.lockTimeInvalid': { zh: '锁定时间格式不正确', en: 'Invalid lock time' },
+  'settings.lockTimeSaved': { zh: '已保存锁定时间', en: 'Lock time saved' },
+  'settings.lockNever': { zh: '永久', en: 'never' },
+  'settings.passwordOnNever': { zh: '管理密码已开启 · 不会自动锁定', en: 'Management password is on · auto-lock disabled' },
+  'settings.passwordOnTimed': { zh: '管理密码已开启 · 空闲 {t} 后锁定', en: 'Management password is on · locks after {t} idle' },
+  'settings.passwordStatusOff': { zh: '已关闭', en: 'Off' },
+  'settings.passwordStatusNever': { zh: '已开启 · 永久', en: 'On · never' },
+  'settings.passwordStatusTimed': { zh: '已开启 · {t}', en: 'On · {t}' },
 
   // ── sidebar ──
   'sidebar.title': { zh: '授权 / 凭证', en: 'Credentials' },
@@ -272,7 +306,8 @@ const DICT: Record<string, Entry> = {
   'api.regenConfirm': { zh: '重新生成 Key？旧 Key 会立即失效', en: 'Regenerate key? The old key stops working immediately' },
   'api.regenerated': { zh: '已生成新 Key', en: 'New key generated' },
   'api.resetConfirm': { zh: '清零这个 API 的用量统计？', en: "Reset this API's usage stats?" },
-  'api.limitPrompt': { zh: '总 tokens 上限（输入＋输出，留空或 0 = 不限）', en: 'Total token cap (in+out; blank or 0 = unlimited)' },
+  'api.limitPrompt': { zh: '总 tokens 上限（输入＋输出；支持 1k / 1.5m / 2b / 1t，留空或 0 = 不限）', en: 'Total token cap (in+out; supports 1k / 1.5m / 2b / 1t; blank or 0 = unlimited)' },
+  'api.limitInvalid': { zh: '上限格式不正确，可用 1k / 1.5m / 2b / 1t', en: 'Invalid cap. Use 1k / 1.5m / 2b / 1t' },
   'api.limitSet': { zh: '已设上限 {n} tokens', en: 'Cap set to {n} tokens' },
   'api.limitCleared': { zh: '已取消上限', en: 'Cap removed' },
   'api.deleteConfirm': { zh: '删除 API「{n}」？', en: 'Delete API "{n}"?' },
@@ -317,6 +352,12 @@ const DICT: Record<string, Entry> = {
 
   // ── app shell / errors ──
   'app.loading': { zh: '正在铺开画纸…', en: 'Unrolling the canvas…' },
+  'lock.title': { zh: '已锁定', en: 'Locked' },
+  'lock.hint': { zh: '输入管理密码后才能继续操作。API 服务器会继续在后台运行。', en: 'Enter the management password to continue. The API server keeps running in the background.' },
+  'lock.placeholder': { zh: '管理密码', en: 'Management password' },
+  'lock.unlock': { zh: '解锁', en: 'Unlock' },
+  'lock.unlocking': { zh: '解锁中…', en: 'Unlocking…' },
+  'lock.badPassword': { zh: '密码不正确', en: 'Incorrect password' },
   'error.title': { zh: '出错了 😵', en: 'Something broke 😵' },
   'error.reload': { zh: '重新加载', en: 'Reload' }
 }

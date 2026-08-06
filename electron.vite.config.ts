@@ -3,7 +3,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
 // API-YES uses three build targets:
-//   main     -> Electron main process (windows, persistence, OAuth, the reverse-proxy server)
+//   main     -> Electron main process + CLI entry (when Electron is launched with ELECTRON_RUN_AS_NODE)
 //   preload  -> the contextBridge API exposed to the renderer
 //   renderer -> a single html entry: the hand-drawn `app` window
 export default defineConfig({
@@ -14,7 +14,10 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        input: { index: resolve('src/main/index.ts') }
+        input: {
+          index: resolve('src/main/index.ts'),
+          cli: resolve('src/cli/index.ts')
+        }
       }
     }
   },

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CredentialView, Id, ProxyEndpoint, ProxyServerStatus } from '@shared/types'
+import { DEFAULT_MANAGEMENT_LOCK_TIMEOUT_MS, type CredentialView, type Id, type ManagementAuthStatus, type ProxyEndpoint, type ProxyServerStatus } from '@shared/types'
 import type { UpdateStatus } from '@shared/api/contract'
 import { api } from './lib/bridge'
 
@@ -26,6 +26,7 @@ interface AppState {
   credentials: CredentialView[]
   proxies: ProxyEndpoint[]
   proxyStatus: ProxyServerStatus
+  managementAuth: ManagementAuthStatus
 
   theme: Theme
   toggleTheme: () => void
@@ -56,6 +57,7 @@ interface AppState {
   checkForUpdate: () => void
 
   init: () => Promise<void>
+  reloadManagementAuth: () => Promise<void>
   reloadCredentials: () => Promise<void>
   reloadProxies: () => Promise<void>
 
@@ -72,6 +74,7 @@ export const useStore = create<AppState>((set, get) => ({
   credentials: [],
   proxies: [],
   proxyStatus: { running: false, host: '127.0.0.1', port: 8788 },
+  managementAuth: { enabled: false, lockTimeoutMs: DEFAULT_MANAGEMENT_LOCK_TIMEOUT_MS },
 
   theme: readTheme(),
   toggleTheme: () => {
@@ -119,14 +122,15 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   init: async () => {
-    const [credentials, proxies, proxyStatus] = await Promise.all([
+    const [credentials, proxies, proxyStatus, managementAuth] = await Promise.all([
       api.query('credentials.list', undefined),
       api.query('proxies.list', {}),
-      api.query('proxy.status', undefined)
+      api.query('proxy.status', undefined),
+      api.query('managementAuth.status', undefined)
     ])
     // keep a stable selection: first credential by default
     const selectedId = get().selectedId ?? credentials[0]?.id ?? null
-    set({ credentials, proxies, proxyStatus, selectedId, ready: true })
+    set({ credentials, proxies, proxyStatus, managementAuth, selectedId, ready: true })
 
     // the renderer (localStorage) is the source of truth for language — push it into persisted
     // settings on startup so the main process localizes its messages to match what the user sees
@@ -148,8 +152,13 @@ export const useStore = create<AppState>((set, get) => ({
       }))
     )
     api.on('proxy.status', (proxyStatus) => set({ proxyStatus }))
+    api.on('settings.changed', (settings) => set({ managementAuth: settings.managementAuth }))
     api.on('update.status', (status) => set({ updateStatus: status }))
     api.on('toast', ({ kind, message }) => get().toast(kind, message))
+  },
+
+  reloadManagementAuth: async () => {
+    set({ managementAuth: await api.query('managementAuth.status', undefined) })
   },
 
   reloadCredentials: async () => {

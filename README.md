@@ -111,6 +111,68 @@ sudo apt install -y ./API-YES_*_amd64.deb
 sudo chmod 4755 /opt/API-YES/chrome-sandbox
 ```
 
+## Setting up the CLI command / environment
+
+API YES also ships a local CLI. The command is `apiyes` for installed builds and `apiyesdev` for this repo's dev build. It is only a local controller: it talks to the API YES app already running on the same machine. If you enabled a management password in Settings, the CLI asks for that password before entering the TUI or running protected commands.
+
+### Development shell
+
+The dev command is generated, not committed. After `npm run build`, run:
+
+```bash
+npm run setenv
+```
+
+Then activate it for the terminal you are using:
+
+```powershell
+# PowerShell
+. .\.apiyes-dev-bin\activate.ps1
+```
+
+```cmd
+:: cmd.exe
+.\.apiyes-dev-bin\activate.cmd
+```
+
+```bash
+# bash / zsh / Git Bash
+. ./.apiyes-dev-bin/activate.sh
+```
+
+Now run:
+
+```bash
+apiyesdev
+```
+
+The generated `.apiyes-dev-bin/` folder is ignored on purpose; it is only a local convenience. A fresh clone can test the dev CLI the same way: run `npm run build`, then `npm run setenv`.
+
+### Installed builds
+
+- **Windows (NSIS installer)** — the installer shows the install-scope page (**current user** or **all users**) and the install-location page. It creates `apiyes` under the installed app's `cli` folder and adds that folder to the matching PATH: current-user installs update the user PATH, all-user installs update the machine PATH. Open a new terminal after installation.
+- **Linux (deb)** — installing the `.deb` creates `/usr/bin/apiyes` automatically and points it at the app in `/opt/API-YES`.
+- **Linux (AppImage)** — AppImage does not install a global command or modify PATH. If you need the `apiyes` command on Linux, install the `.deb` package instead.
+- **macOS** — the unsigned `.dmg` / `.zip` build does not modify your shell PATH. After copying `API-YES.app` to `/Applications`, create a wrapper:
+
+  ```bash
+  mkdir -p ~/.local/bin
+  cat > ~/.local/bin/apiyes <<'EOF'
+  #!/usr/bin/env sh
+  export APIYES_ENV=prod
+  export ELECTRON_RUN_AS_NODE=1
+  exec /Applications/API-YES.app/Contents/MacOS/API-YES /Applications/API-YES.app/Contents/Resources/app.asar/out/main/cli.js --env prod "$@"
+  EOF
+  chmod +x ~/.local/bin/apiyes
+  ```
+
+  Make sure `~/.local/bin` is on your shell PATH. For zsh:
+
+  ```bash
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+  exec zsh
+  ```
+
 ## Tech stack
 
 Electron · electron-vite · React 19 · Zustand · Tailwind CSS · framer-motion · Rough.js · TypeScript.

@@ -6,6 +6,7 @@ import { TitleBar } from './components/TitleBar'
 import { DoodleDialog } from './components/DoodleDialog'
 import { Toasts } from './components/Toasts'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { LockOverlay } from './components/LockOverlay'
 import { Sidebar } from './features/credentials/Sidebar'
 import { CredentialDetail } from './features/credentials/CredentialDetail'
 
@@ -40,6 +41,7 @@ export default function App(): JSX.Element {
 
       <Toasts />
       <DoodleDialog />
+      <LockOverlay />
     </div>
   )
 }

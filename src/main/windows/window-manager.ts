@@ -57,16 +57,20 @@ export class WindowManager {
     core.queries.register('settings.get', () => ({ ...core.store.data.settings }))
     core.commands.register('settings.update', ({ patch }) => {
       const prevLang = core.store.data.settings.lang
+      // Management-password state is guarded by management-auth-service; the generic settings patch
+      // must not be able to toggle it without the password flow.
+      const safePatch = { ...patch }
+      delete safePatch.managementAuth
       core.store.mutate((db) => {
-        db.settings = { ...db.settings, ...patch }
+        db.settings = { ...db.settings, ...safePatch }
       })
-      if (patch.launchAtLogin !== undefined && app.isPackaged) {
-        app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin })
+      if (safePatch.launchAtLogin !== undefined && app.isPackaged) {
+        app.setLoginItemSettings({ openAtLogin: safePatch.launchAtLogin })
       }
-      if (patch.runInBackground !== undefined) this.syncTray()
+      if (safePatch.runInBackground !== undefined) this.syncTray()
       // mirror the renderer's language switch into the main process, then relabel the tray
-      if (patch.lang !== undefined && patch.lang !== prevLang) {
-        setMainLang(patch.lang)
+      if (safePatch.lang !== undefined && safePatch.lang !== prevLang) {
+        setMainLang(safePatch.lang)
         this.refreshTrayMenu()
       }
       // let other services (e.g. the proxy server) react to host/port changes

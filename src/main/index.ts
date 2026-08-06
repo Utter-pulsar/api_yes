@@ -9,8 +9,10 @@ import { registerCredentialService } from './services/credential-service'
 import { registerProxyService } from './services/proxy-service'
 import { registerUsageHistoryService } from './services/usage-history'
 import { registerOAuthService } from './services/oauth-service'
+import { registerManagementAuthService } from './services/management-auth-service'
 import { registerUpdater } from './services/updater'
 import { ProxyServer } from './services/proxy-server'
+import { ManagementServer } from './services/management-server'
 import { WindowManager } from './windows/window-manager'
 import { registerIpc } from './ipc/register-ipc'
 
@@ -21,6 +23,7 @@ if (!app.requestSingleInstanceLock()) {
 
 let store: Store | null = null
 let proxyServer: ProxyServer | null = null
+let managementServer: ManagementServer | null = null
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.utterpulsar.apiyes')
@@ -42,6 +45,7 @@ app.whenReady().then(() => {
   registerCredentialService(core)
   registerUsageHistoryService(core)
   registerOAuthService(core)
+  registerManagementAuthService(core)
   registerUpdater(core)
 
   // windows must exist before events are emitted so broadcast can deliver them
@@ -50,6 +54,9 @@ app.whenReady().then(() => {
 
   proxyServer = new ProxyServer(core)
   registerProxyService(core, proxyServer)
+
+  managementServer = new ManagementServer(core)
+  void managementServer.start()
 
   registerIpc(core)
 
@@ -72,6 +79,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void managementServer?.stop()
   void proxyServer?.stop()
   store?.flush()
 })

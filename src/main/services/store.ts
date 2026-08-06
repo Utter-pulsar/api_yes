@@ -13,8 +13,10 @@ import type {
 } from '@shared/types'
 import {
   DEFAULT_CODEX_MODELS,
+  DEFAULT_MANAGEMENT_LOCK_TIMEOUT_MS,
   DEFAULT_SETTINGS,
   LEGACY_CODEX_MODEL_DEFAULTS,
+  defaultManagementAuthConfig,
   emptyUsageHistoryTree
 } from '@shared/types'
 import { migrateLegacyHistory, reconcileHistoryWithCounters } from './usage-history'
@@ -58,9 +60,16 @@ export interface StoredCredential {
   oauth?: OAuthTokens
 }
 
+export interface ManagementPasswordRecord {
+  passwordHash?: string
+  passwordSalt?: string
+}
+
 export interface Database {
   version: number
   settings: AppSettings
+  /** Management password hash material. Kept outside AppSettings so settings.get never leaks it. */
+  managementPassword: ManagementPasswordRecord
   credentials: StoredCredential[]
   proxies: ProxyEndpoint[]
   /** permanent per-day, per-model token ledger tree (survives model-list changes, usage resets
@@ -80,6 +89,7 @@ interface PersistedCredential extends Omit<StoredCredential, 'apiKey' | 'oauth'>
 interface PersistedDB {
   version: number
   settings: AppSettings
+  managementPassword?: ManagementPasswordRecord
   credentials: PersistedCredential[]
   proxies: ProxyEndpoint[]
   /** tree since v0.0.8; the flat pre-tree shape is still readable and migrated on first load */
@@ -90,6 +100,7 @@ function emptyDb(): Database {
   return {
     version: SCHEMA_VERSION,
     settings: normalizeSettings(undefined),
+    managementPassword: {},
     credentials: [],
     proxies: [],
     usageHistory: emptyUsageHistoryTree()
@@ -108,6 +119,16 @@ function normalizeSettings(raw: Partial<AppSettings> | undefined): AppSettings {
   const isLegacyDefault = LEGACY_CODEX_MODEL_DEFAULTS.some((legacy) => sameStringList(rawModels, legacy))
   if (!Array.isArray(rawModels) || rawModels.length === 0 || isLegacyDefault) {
     settings.codexModels = [...DEFAULT_CODEX_MODELS]
+  }
+  const rawAuth = raw?.managementAuth
+  settings.managementAuth = {
+    ...defaultManagementAuthConfig(),
+    enabled: rawAuth?.enabled === true,
+    lockTimeoutMs: rawAuth?.lockTimeoutMs ?? DEFAULT_MANAGEMENT_LOCK_TIMEOUT_MS
+  }
+  if (settings.managementAuth.lockTimeoutMs !== null) {
+    const ms = Math.floor(Number(settings.managementAuth.lockTimeoutMs) || 0)
+    settings.managementAuth.lockTimeoutMs = ms > 0 ? ms : DEFAULT_MANAGEMENT_LOCK_TIMEOUT_MS
   }
   return settings
 }
@@ -358,6 +379,7 @@ export class Store {
     return {
       version: raw.version ?? SCHEMA_VERSION,
       settings: normalizeSettings(raw.settings),
+      managementPassword: raw.managementPassword ?? {},
       credentials,
       proxies,
       usageHistory
@@ -382,6 +404,7 @@ export class Store {
     const persisted: PersistedDB = {
       version: this.db.version,
       settings: this.db.settings,
+      managementPassword: this.db.managementPassword,
       proxies: this.db.proxies,
       usageHistory: this.db.usageHistory,
       credentials: this.db.credentials.map((c) => {

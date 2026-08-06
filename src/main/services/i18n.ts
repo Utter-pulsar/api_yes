@@ -61,6 +61,8 @@ const DICT: Record<string, Entry> = {
   'err.sameKeyModeOff': { zh: '相同 API Key 模式尚未开启', en: 'Same API key mode is not enabled' },
   'err.proxySameKeyNotDuplicated': { zh: '当前这个 API Key 没有和别的 API 重复', en: 'This API key is not duplicated with any other API' },
   'err.proxySameKeyModeOff': { zh: '这个 API Key 的相同 Key 模式尚未开启', en: 'Same-key mode is not enabled for this API key' },
+  'err.badManagementPassword': { zh: '管理密码不正确', en: 'Management password is incorrect' },
+  'err.managementPasswordTooShort': { zh: '管理密码至少需要 4 个字符', en: 'Management password must be at least 4 characters' },
 
   // ── proxy server (runtime) ──
   'proxy.portTaken': { zh: '端口 {port} 已被占用', en: 'Port {port} is already in use' },

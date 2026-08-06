@@ -37,6 +37,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   perMachine: false
   artifactName: ${productName}-${version}-setup.${ext}
+  include: build/installer.nsh
 
 mac:
   target:
@@ -59,6 +60,11 @@ linux:
     - deb
   category: Utility
   maintainer: Utter_pulsar <noreply@apiyes.app>
+  executableName: api-yes
+
+deb:
+  afterInstall: build/linux-cli-after-install.sh
+  afterRemove: build/linux-cli-after-remove.sh
 
 appImage:
   artifactName: ${productName}-${version}.${ext}

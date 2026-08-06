@@ -16,6 +16,25 @@ export const LEGACY_CODEX_MODEL_DEFAULTS = [
   ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2']
 ]
 
+export const DEFAULT_MANAGEMENT_LOCK_TIMEOUT_MS = 5 * 60 * 1000
+
+/** Renderer-safe management-password configuration. Hash material stays in main and never crosses IPC. */
+export interface ManagementAuthConfig {
+  enabled: boolean
+  /** null = management password is enabled, but the UI never auto-locks for inactivity. */
+  lockTimeoutMs: number | null
+}
+
+/** Renderer/CLI-safe view of the management password state. */
+export interface ManagementAuthStatus {
+  enabled: boolean
+  lockTimeoutMs: number | null
+}
+
+export function defaultManagementAuthConfig(): ManagementAuthConfig {
+  return { enabled: false, lockTimeoutMs: DEFAULT_MANAGEMENT_LOCK_TIMEOUT_MS }
+}
+
 export interface AppSettings {
   /** local reverse-proxy server port */
   proxyPort: number
@@ -29,6 +48,8 @@ export interface AppSettings {
   lang: Lang
   /** user-curated Codex (ChatGPT subscription) model list, priority-ordered; never edited in place */
   codexModels: string[]
+  /** local management password for unlocking the app UI and authorizing management clients */
+  managementAuth: ManagementAuthConfig
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -37,5 +58,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   runInBackground: false,
   launchAtLogin: false,
   lang: 'zh',
-  codexModels: [...DEFAULT_CODEX_MODELS]
+  codexModels: [...DEFAULT_CODEX_MODELS],
+  managementAuth: defaultManagementAuthConfig()
 }

@@ -672,7 +672,7 @@ export function UsageHistoryDialog({
                 </span>
                 <span className="mono text-base font-bold" title={`${grouped(stats.grandTokens)} tokens`}>
                   {compact(stats.grandTokens)} tokens
-                  <span className="ml-2 text-xs font-normal opacity-50">{t('uh.reqs', { n: grouped(stats.grandReqs) })}</span>
+                  <span className="ml-2 text-xs font-normal opacity-50">{t('uh.reqs', { n: compact(stats.grandReqs) })}</span>
                 </span>
               </div>
               {stats.ranked.length === 0 ? (
@@ -692,7 +692,7 @@ export function UsageHistoryDialog({
                       <span className="mono min-w-0 flex-1 truncate opacity-75" title={labelOf(r.model)}>
                         {labelOf(r.model)}
                       </span>
-                      <span className="shrink-0 text-xs opacity-45">{t('uh.reqs', { n: grouped(r.requests) })}</span>
+                      <span className="shrink-0 text-xs opacity-45">{t('uh.reqs', { n: compact(r.requests) })}</span>
                       <span className="mono w-20 shrink-0 text-right font-bold" title={`${grouped(r.tokens)} tokens`}>
                         {compact(r.tokens)}
                       </span>
@@ -762,7 +762,7 @@ function BreakdownList({
               >
                 {compact(e.totals.inputTokens + e.totals.outputTokens)} tokens
               </span>
-              <span className="ml-2 text-xs opacity-45">{t('uh.reqs', { n: grouped(e.totals.requests) })}</span>
+              <span className="ml-2 text-xs opacity-45">{t('uh.reqs', { n: compact(e.totals.requests) })}</span>
             </span>
             {e.deleted && (
               <button
@@ -817,7 +817,7 @@ function TipCard({
               <div key={e.model} className="flex items-center gap-1.5 text-xs">
                 <span className="h-[3px] w-3 shrink-0 rounded-full" style={{ background: e.color }} />
                 <span className="mono min-w-0 flex-1 truncate opacity-70">{e.label}</span>
-                <span className="mono shrink-0 font-bold">{grouped(e.tokens)}</span>
+                <span className="mono shrink-0 font-bold">{compact(e.tokens)}</span>
               </div>
             ))}
           </div>
@@ -826,7 +826,7 @@ function TipCard({
               {t('uh.ttTotal')}
               <span className="ml-1.5 opacity-70">{t('uh.reqs', { n: tip.info.requests })}</span>
             </span>
-            <span className="mono font-bold">{t('uh.tokensN', { n: grouped(tip.info.total) })}</span>
+            <span className="mono font-bold">{t('uh.tokensN', { n: compact(tip.info.total) })}</span>
           </div>
         </>
       )}

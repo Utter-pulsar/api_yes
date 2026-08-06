@@ -1,8 +1,13 @@
-/** Compact token counts: 1234 → "1.2k", 1_500_000 → "1.5M". */
+import { formatCompactNumber, parseCompactNumber } from '@shared/number-format'
+
+/** Compact token counts: 1234 → "1.2k", 1_500_000 → "1.5m". */
 export function compact(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0)}M`
+  return formatCompactNumber(n)
+}
+
+/** Parse token amounts: 1000, 1k, 1.5m, 2B, 0.25t. */
+export function parseCompactAmount(input: string): number | undefined {
+  return parseCompactNumber(input)
 }
 
 /** Full grouped number: 1234567 → "1,234,567". */

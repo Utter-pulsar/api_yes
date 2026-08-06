@@ -5,6 +5,7 @@ import { api } from '../../lib/bridge'
 import { useT } from '../../lib/i18n'
 import { DialogShell } from '../../components/DialogShell'
 import { DoodleButton } from '../../components/doodle/DoodleButton'
+import { compact, grouped } from '../../lib/format'
 
 /** Stable window key → localized label. Unknown keys fall back to the window's own `label`/key. */
 const WIN_LABEL_KEY: Record<string, string> = {
@@ -57,9 +58,20 @@ function UsageBar({ win, index }: { win: UsageWindow; index: number }): JSX.Elem
           transition={{ type: 'spring', stiffness: 120, damping: 16, delay: 0.06 + index * 0.08 }}
         />
       </div>
-      {resetIn !== undefined && resetIn > 0 && (
-        <div className="mt-1 text-right text-xs opacity-50">
-          {t('usage.resetIn', { t: formatDur(resetIn, t) })}
+      {(win.used !== undefined || win.limit !== undefined || (resetIn !== undefined && resetIn > 0)) && (
+        <div className="mt-1 flex justify-between gap-2 text-xs opacity-50">
+          <span>
+            {win.used !== undefined && win.limit !== undefined
+              ? `${compact(win.used)} / ${compact(win.limit)} ${win.unit ?? ''}`
+              : win.used !== undefined
+                ? `${compact(win.used)} ${win.unit ?? ''}`
+                : win.limit !== undefined
+                  ? `${compact(win.limit)} ${win.unit ?? ''}`
+                  : ''}
+          </span>
+          <span title={win.used !== undefined && win.limit !== undefined ? `${grouped(win.used)} / ${grouped(win.limit)} ${win.unit ?? ''}` : undefined}>
+            {resetIn !== undefined && resetIn > 0 ? t('usage.resetIn', { t: formatDur(resetIn, t) }) : ''}
+          </span>
         </div>
       )}
     </div>

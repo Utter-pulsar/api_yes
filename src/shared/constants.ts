@@ -1,6 +1,10 @@
 export const APP_NAME = 'API-YES'
 export const APP_AUTHOR = 'Utter_pulsar'
 export const DATA_FILE = 'api-yes.json'
+export const MANAGEMENT_STATUS_FILE = 'api-yes-management.json'
+export const CLI_SESSION_FILE = 'api-yes-cli-session.json'
+export const DEFAULT_MANAGEMENT_PORT = 8789
+export const DEV_MANAGEMENT_PORT = 18789
 
 /** Hand-drawn marker palette. Referenced by UI accents. */
 export const DOODLE_PALETTE: Record<string, string> = {
