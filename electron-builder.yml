@@ -9,6 +9,10 @@ directories:
 # Exclusion-style (electron-vite convention): keeps out/, package.json AND the
 # production node_modules the main process requires at runtime. Only source/config
 # junk is stripped.
+asarUnpack:
+  - out/main/cli.js
+  - out/main/chunks/**/*
+
 files:
   - '!**/.vscode/*'
   - '!{.eslintrc,.eslintrc.cjs,.prettierrc,.prettierignore,.editorconfig}'
@@ -30,6 +34,7 @@ extraResources:
 win:
   target:
     - nsis
+  icon: build/icon.png
   # build/icon.png is auto-converted to a multi-size .ico by electron-builder
 
 nsis:
@@ -61,6 +66,10 @@ linux:
   category: Utility
   maintainer: Utter_pulsar <noreply@apiyes.app>
   executableName: api-yes
+  icon: build/icon.png
+  desktop:
+    Name: API-YES
+    StartupWMClass: api-yes
 
 deb:
   afterInstall: build/linux-cli-after-install.sh
@@ -72,6 +81,8 @@ appImage:
 # Update feed: electron-updater reads this (embedded as app-update.yml) to find newer
 # GitHub Releases. The build workflow ships latest*.yml / .blockmap into each Release so
 # installed apps can discover + auto-install updates.
+afterPack: scripts/prepare-windows-cli-runtime.cjs
+
 publish:
   provider: github
   owner: Utter-pulsar

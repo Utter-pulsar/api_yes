@@ -11,8 +11,8 @@
   FileWrite $0 'set "_APIYES_OLD_CP=%_APIYES_OLD_CP: =%"$\r$\n'
   FileWrite $0 'chcp 65001 >nul$\r$\n'
   FileWrite $0 'set "APIYES_ENV=prod"$\r$\n'
-  FileWrite $0 'set "ELECTRON_RUN_AS_NODE=1"$\r$\n'
-  FileWrite $0 'start "" /b /wait "%~dp0..\${APP_EXECUTABLE_FILENAME}" "%~dp0..\resources\app.asar\out\main\cli.js" --env prod %*$\r$\n'
+  FileWrite $0 'set "APIYES_APP_EXECUTABLE=%~dp0..\${APP_EXECUTABLE_FILENAME}"$\r$\n'
+  FileWrite $0 '"%~dp0..\resources\node.exe" "%~dp0..\resources\app.asar.unpacked\out\main\cli.js" --env prod %*$\r$\n'
   FileWrite $0 'set "_APIYES_EXIT=%ERRORLEVEL%"$\r$\n'
   FileWrite $0 'if defined _APIYES_OLD_CP chcp %_APIYES_OLD_CP% >nul$\r$\n'
   FileWrite $0 'exit /b %_APIYES_EXIT%$\r$\n'
@@ -22,8 +22,8 @@
   FileWrite $0 '#!/usr/bin/env sh$\n'
   FileWrite $0 'SCRIPT_DIR="$$(CDPATH= cd -- "$$(dirname -- "$$0")" && pwd)"$\n'
   FileWrite $0 'export APIYES_ENV=prod$\n'
-  FileWrite $0 'export ELECTRON_RUN_AS_NODE=1$\n'
-  FileWrite $0 'exec "$$SCRIPT_DIR/../${APP_EXECUTABLE_FILENAME}" "$$SCRIPT_DIR/../resources/app.asar/out/main/cli.js" --env prod "$$@"$\n'
+  FileWrite $0 'export APIYES_APP_EXECUTABLE="$$SCRIPT_DIR/../${APP_EXECUTABLE_FILENAME}"$\n'
+  FileWrite $0 'exec "$$SCRIPT_DIR/../resources/node.exe" "$$SCRIPT_DIR/../resources/app.asar.unpacked/out/main/cli.js" --env prod "$$@"$\n'
   FileClose $0
 !macroend
 

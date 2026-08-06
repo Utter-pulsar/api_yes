@@ -93,7 +93,7 @@ export class WindowManager {
       backgroundColor: '#FBF7EF',
       autoHideMenuBar: true,
       titleBarStyle: 'hidden',
-      ...(is.dev ? { icon: join(process.cwd(), 'build', 'icon.png') } : {}),
+      ...((is.dev || process.platform === 'linux') ? { icon: is.dev ? join(process.cwd(), 'assets', 'logo.png') : join(process.resourcesPath, 'assets', 'logo.png') } : {}),
       show: false,
       webPreferences: { preload: PRELOAD, sandbox: false }
     })

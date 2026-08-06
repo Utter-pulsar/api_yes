@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { emitKeypressEvents } from 'node:readline'
 import { createInterface } from 'node:readline/promises'
 import { CLI_SESSION_FILE, MANAGEMENT_STATUS_FILE } from '@shared/constants'
@@ -54,6 +55,14 @@ function statusPath(): string {
   return join(appDataDir(env), MANAGEMENT_STATUS_FILE)
 }
 
+function installedAppExecutable(): string | undefined {
+  if (process.env.APIYES_APP_EXECUTABLE) return process.env.APIYES_APP_EXECUTABLE
+  if (env !== 'prod') return undefined
+  if (process.platform === 'linux') return '/opt/API-YES/api-yes'
+  if (process.platform === 'darwin') return '/Applications/API-YES.app/Contents/MacOS/API-YES'
+  return undefined
+}
+
 function sessionPath(): string {
   return join(appDataDir(env), CLI_SESSION_FILE)
 }
@@ -95,26 +104,64 @@ function clearStatusFile(file: string): void {
 }
 
 function missingAppMessage(): string {
-  return env === 'dev'
-    ? '未找到开发版 API-YES。请先运行 npm run dev。'
-    : '未找到 API-YES。请先启动已安装的 API-YES。'
+  const launcher = installedAppExecutable()
+  if (env === 'dev') return '未找到开发版 API-YES。请先运行 npm run dev。'
+  const suffix = launcher ? `（也可以运行 ${launcher} 启动）` : ''
+  return `未找到正在运行的 API-YES。请先启动已安装的 API-YES${suffix}。`
 }
 
-function readStatus(): StatusFile {
+function readStatusFromDisk(): StatusFile | undefined {
   const file = statusPath()
-  if (!existsSync(file)) throw new Error(missingAppMessage())
+  if (!existsSync(file)) return undefined
   let status: StatusFile
   try {
     status = JSON.parse(readFileSync(file, 'utf8')) as StatusFile
   } catch {
     clearStatusFile(file)
-    throw new Error(missingAppMessage())
+    return undefined
   }
   if (!isProcessAlive(status.pid)) {
     clearStatusFile(file)
-    throw new Error(`API-YES 管理接口状态已过期。请重新启动 ${env === 'dev' ? '开发版 API-YES' : 'API-YES'} 后再运行 ${commandName()}。`)
+    return undefined
   }
   return status
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function launchInstalledApp(): boolean {
+  const executable = installedAppExecutable()
+  if (!executable || !existsSync(executable)) return false
+  try {
+    const childEnv = { ...process.env }
+    delete childEnv.ELECTRON_RUN_AS_NODE
+    delete childEnv.APIYES_NODE_REEXEC
+    const child = spawn(executable, [], {
+      cwd: dirname(executable),
+      detached: true,
+      stdio: 'ignore',
+      env: childEnv
+    })
+    child.unref()
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function readStatus(): Promise<StatusFile> {
+  const existing = readStatusFromDisk()
+  if (existing) return existing
+  if (env === 'prod' && launchInstalledApp()) {
+    for (let i = 0; i < 40; i += 1) {
+      await sleep(250)
+      const status = readStatusFromDisk()
+      if (status) return status
+    }
+  }
+  throw new Error(missingAppMessage())
 }
 
 function readSession(): string | undefined {
@@ -142,7 +189,7 @@ function isObject(value: unknown): value is JsonObject {
 }
 
 async function request<T>(method: HttpMethod, path: string, body?: unknown, retryLogin = true): Promise<T> {
-  const status = readStatus()
+  const status = await readStatus()
   const session = readSession()
   const headers: Record<string, string> = {
     'x-api-yes-token': status.token,
@@ -159,7 +206,7 @@ async function request<T>(method: HttpMethod, path: string, body?: unknown, retr
     })
   } catch (e) {
     const cause = e instanceof Error && e.cause instanceof Error ? `：${e.cause.message}` : ''
-    throw new Error(`无法连接 API-YES 管理接口 ${status.host}:${status.port}${cause}。请重新启动 API-YES 后再运行 ${commandName()}。`)
+    throw new Error(`无法连接 API-YES 管理接口 ${status.host}:${status.port}${cause}。请重新启动 API-YES 后再运行 ${commandName()}。${installedAppExecutable() ? `（启动命令：${installedAppExecutable()}）` : ''}`)
   }
   const text = await res.text()
   const payload = text ? (JSON.parse(text) as unknown) : null
