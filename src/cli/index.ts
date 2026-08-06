@@ -76,16 +76,45 @@ function stripEnvArgs(argv: string[]): string[] {
   return out
 }
 
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e instanceof Error && 'code' in e && e.code === 'EPERM'
+  }
+}
+
+function clearStatusFile(file: string): void {
+  try {
+    unlinkSync(file)
+  } catch {
+    // best effort: the next request will surface the original problem if cleanup fails
+  }
+}
+
+function missingAppMessage(): string {
+  return env === 'dev'
+    ? '未找到开发版 API-YES。请先运行 npm run dev。'
+    : '未找到 API-YES。请先启动已安装的 API-YES。'
+}
+
 function readStatus(): StatusFile {
   const file = statusPath()
-  if (!existsSync(file)) {
-    throw new Error(
-      env === 'dev'
-        ? '未找到开发版 API-YES。请先运行 npm run dev。'
-        : '未找到 API-YES。请先启动已安装的 API-YES。'
-    )
+  if (!existsSync(file)) throw new Error(missingAppMessage())
+  let status: StatusFile
+  try {
+    status = JSON.parse(readFileSync(file, 'utf8')) as StatusFile
+  } catch {
+    clearStatusFile(file)
+    throw new Error(missingAppMessage())
   }
-  return JSON.parse(readFileSync(file, 'utf8')) as StatusFile
+  if (!isProcessAlive(status.pid)) {
+    clearStatusFile(file)
+    throw new Error(`API-YES 管理接口状态已过期。请重新启动 ${env === 'dev' ? '开发版 API-YES' : 'API-YES'} 后再运行 ${commandName()}。`)
+  }
+  return status
 }
 
 function readSession(): string | undefined {
@@ -120,11 +149,18 @@ async function request<T>(method: HttpMethod, path: string, body?: unknown, retr
     'content-type': 'application/json'
   }
   if (session) headers.authorization = `Bearer ${session}`
-  const res = await fetch(`http://${status.host}:${status.port}${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body)
-  })
+  const url = `http://${status.host}:${status.port}${path}`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    })
+  } catch (e) {
+    const cause = e instanceof Error && e.cause instanceof Error ? `：${e.cause.message}` : ''
+    throw new Error(`无法连接 API-YES 管理接口 ${status.host}:${status.port}${cause}。请重新启动 API-YES 后再运行 ${commandName()}。`)
+  }
   const text = await res.text()
   const payload = text ? (JSON.parse(text) as unknown) : null
   if (res.status === 401 && retryLogin) {

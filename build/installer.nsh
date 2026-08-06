@@ -2,12 +2,20 @@
 
 !macro APIYES_WRITE_WINDOWS_CLI
   CreateDirectory "$INSTDIR\cli"
+  Delete "$INSTDIR\cli\apiyes.ps1"
 
   FileOpen $0 "$INSTDIR\cli\apiyes.cmd" w
   FileWrite $0 '@echo off$\r$\n'
+  FileWrite $0 'setlocal$\r$\n'
+  FileWrite $0 "for /f $\"tokens=2 delims=:$\" %%A in ('chcp') do set $\"_APIYES_OLD_CP=%%A$\"$\r$\n"
+  FileWrite $0 'set "_APIYES_OLD_CP=%_APIYES_OLD_CP: =%"$\r$\n'
+  FileWrite $0 'chcp 65001 >nul$\r$\n'
   FileWrite $0 'set "APIYES_ENV=prod"$\r$\n'
   FileWrite $0 'set "ELECTRON_RUN_AS_NODE=1"$\r$\n'
   FileWrite $0 '"%~dp0..\${APP_EXECUTABLE_FILENAME}" "%~dp0..\resources\app.asar\out\main\cli.js" --env prod %*$\r$\n'
+  FileWrite $0 'set "_APIYES_EXIT=%ERRORLEVEL%"$\r$\n'
+  FileWrite $0 'if defined _APIYES_OLD_CP chcp %_APIYES_OLD_CP% >nul$\r$\n'
+  FileWrite $0 'exit /b %_APIYES_EXIT%$\r$\n'
   FileClose $0
 
   FileOpen $0 "$INSTDIR\cli\apiyes" w
@@ -30,7 +38,7 @@
 !macro APIYES_ADD_WINDOWS_PATH
   !insertmacro APIYES_SET_PATH_TARGET
 
-  nsExec::ExecToLog `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$target=[EnvironmentVariableTarget]::$1; $$cli='$INSTDIR\cli'; $$path=[Environment]::GetEnvironmentVariable('Path', $$target); $$parts=@(); if ($$path) { $$parts=$$path -split ';' | Where-Object { $$_ } }; if (-not ($$parts | Where-Object { $$_ -ieq $$cli })) { $$parts += $$cli; [Environment]::SetEnvironmentVariable('Path', ($$parts -join ';'), $$target) }"`
+  nsExec::ExecToLog `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$target=[EnvironmentVariableTarget]::$1; $$cli='$INSTDIR\cli'; $$path=[Environment]::GetEnvironmentVariable('Path', $$target); $$parts=@(); if ($$path) { $$parts=$$path -split ';' | Where-Object { $$_ -and ($$_ -ine $$cli) } }; $$parts += $$cli; [Environment]::SetEnvironmentVariable('Path', ($$parts -join ';'), $$target)"`
   Pop $0
   ${If} $0 != 0
     DetailPrint "Failed to update the $1 PATH for API-YES CLI (exit $0)."
