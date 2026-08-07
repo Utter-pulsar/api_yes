@@ -45,9 +45,15 @@ function initCli(rawArgs: string[]): void {
 }
 
 function appDataDir(target: Env): string {
-  const appName = target === 'dev' ? 'API-YES-dev' : 'API-YES'
-  if (process.platform === 'win32') return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), appName)
-  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', appName)
+  if (process.platform === 'win32') {
+    const appName = target === 'dev' ? 'API-YES-dev' : 'API-YES'
+    return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), appName)
+  }
+  if (process.platform === 'darwin') {
+    const appName = target === 'dev' ? 'API-YES-dev' : 'API-YES'
+    return join(homedir(), 'Library', 'Application Support', appName)
+  }
+  const appName = target === 'dev' ? 'API-YES-dev' : 'api-yes'
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), appName)
 }
 

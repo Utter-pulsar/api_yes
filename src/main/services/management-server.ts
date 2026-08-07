@@ -109,7 +109,7 @@ function readJson(req: IncomingMessage): Promise<unknown> {
 export class ManagementServer {
   private server: Server | null = null
   private readonly token = randomBytes(32).toString('base64url')
-  private readonly sessions = new Set<string>()
+  private readonly sessions = new Map<string, number>()
   private port = app.isPackaged ? DEFAULT_MANAGEMENT_PORT : DEV_MANAGEMENT_PORT
 
   constructor(private readonly core: AppCore) {}
@@ -170,7 +170,16 @@ export class ManagementServer {
 
   private hasSession(req: IncomingMessage): boolean {
     const session = bearer(req) ?? stringValue(req.headers['x-api-yes-session'])
-    return !!session && this.sessions.has(session)
+    if (!session) return false
+    const lastSeen = this.sessions.get(session)
+    if (lastSeen === undefined) return false
+    const lockTimeoutMs = this.core.store.data.settings.managementAuth.lockTimeoutMs
+    if (lockTimeoutMs !== null && Date.now() - lastSeen > lockTimeoutMs) {
+      this.sessions.delete(session)
+      return false
+    }
+    this.sessions.set(session, Date.now())
+    return true
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -252,7 +261,7 @@ export class ManagementServer {
         return
       }
       const sessionToken = randomBytes(32).toString('base64url')
-      this.sessions.add(sessionToken)
+      this.sessions.set(sessionToken, Date.now())
       json(res, 200, { ok: true, managementAuth: authStatus(this.core), sessionToken })
       return
     }
@@ -269,7 +278,7 @@ export class ManagementServer {
       const lockTimeoutMs = body.lockTimeoutMs === null ? null : numberOrUndefined(body.lockTimeoutMs)
       const managementAuth = await this.core.commands.execute('managementAuth.enable', { password, lockTimeoutMs: lockTimeoutMs === undefined ? DEFAULT_MANAGEMENT_LOCK_TIMEOUT_MS : lockTimeoutMs })
       const sessionToken = randomBytes(32).toString('base64url')
-      this.sessions.add(sessionToken)
+      this.sessions.set(sessionToken, Date.now())
       json(res, 200, { ok: true, managementAuth, sessionToken })
       return
     }
