@@ -1,6 +1,6 @@
 {
   "name": "api-yes",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "API-YES — a hand-drawn desktop gateway: sign in with OpenAI / Anthropic OAuth (or paste an API key) and spin up metered reverse-proxy endpoints.",
   "desktopName": "api-yes.desktop",
   "author": "Utter_pulsar",
